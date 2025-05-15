@@ -72,7 +72,7 @@ func NewMagicConfig[T any](config *T, options *MagicConfigOptions) (*magicConfig
 		transformFuncs = options.TransformFuncs
 	}
 
-	fullConfig := makeFullConfig(configVal, prefix, nil).Interface()
+	fullConfig := makeFullConfig(configVal, prefix, nil, nil, nil).Interface()
 
 	return &magicConfig[T]{
 		originalConfig:      config,

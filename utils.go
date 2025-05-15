@@ -29,33 +29,50 @@ func recursiveStruct(c reflect.Value) bool {
 		c.Type() != timePtrType
 }
 
-func makeFullConfig(c reflect.Value, prefix string, parentName *string) reflect.Value {
+func makeFullConfig(
+	c reflect.Value,
+	prefix string,
+	parentName *string,
+	envParentName *string,
+	nameMap map[string]int,
+) reflect.Value {
 	if !recursiveStruct(c) {
 		return reflect.Zero(c.Type())
 	}
 
 	populateEmptyStructs(c)
 
+	if len(nameMap) == 0 {
+		nameMap = makeNameMap(c, prefix)
+	}
+
 	fields := make([]reflect.StructField, 0)
 	var newField reflect.StructField
-
 	cVal := c.Elem()
+
 	for i := range cVal.NumField() {
 		field := cVal.Type().Field(i)
 		fld := cVal.Field(i)
 		name := field.Name
 		structField := recursiveStruct(fld)
-		tag := buildTag(field.Tag, name, prefix, structField, parentName)
 
 		newParentName := convertNameToCommandLine(name, parentName)
+		newEnvParentName := ""
+		if envParentName != nil {
+			newEnvParentName = fmt.Sprintf("%s_%s", *envParentName, formEnvName(name))
+		} else {
+			newEnvParentName = formEnvName(name)
+		}
+
+		tag := buildTag(field.Tag, name, prefix, structField, parentName, envParentName, nameMap)
 
 		fieldType := field.Type
 
 		if structField {
-			f := makeFullConfig(fld, prefix, &newParentName)
+			f := makeFullConfig(fld, prefix, &newParentName, &newEnvParentName, nameMap)
 			fieldType = f.Type()
 		}
-
+		println(tag)
 		newField = reflect.StructField{
 			Name: name,
 			Type: fieldType,
@@ -72,18 +89,40 @@ func makeFullConfig(c reflect.Value, prefix string, parentName *string) reflect.
 	return newValue
 }
 
+func makeNameMap(cVal reflect.Value, prefix string) map[string]int {
+	c := reflect.Indirect(cVal)
+	nameMap := make(map[string]int)
+	for i := range c.NumField() {
+		field := c.Type().Field(i)
+		fld := c.Field(i)
+		name := field.Name
+		structField := recursiveStruct(fld)
+		if !structField {
+			nameMap[formEnvName(name)]++
+			continue
+		}
+		subMap := makeNameMap(fld, prefix)
+		for k := range subMap {
+			nameMap[k]++
+		}
+	}
+	return nameMap
+}
+
 func buildTag(
 	tag reflect.StructTag,
 	name string,
 	prefix string,
 	structField bool,
 	parentName *string,
+	envParentName *string,
+	nameMap map[string]int,
 ) reflect.StructTag {
 	var sb strings.Builder
 
 	sb.WriteString(string(tag))
 	if !structField && tag.Get("env") == "" {
-		sb.WriteString(fmt.Sprintf(` env:"%s"`, convertNameToEnv(name, prefix)))
+		sb.WriteString(fmt.Sprintf(` env:"%s"`, convertNameToEnv(name, envParentName, prefix, nameMap)))
 	}
 	if tag.Get("yaml") == "" {
 		sb.WriteString(fmt.Sprintf(` yaml:"%s"`, convertNameToYAML(name)))
