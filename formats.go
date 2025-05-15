@@ -27,7 +27,7 @@ func formEnvName(name string) string {
 	return strings.ToUpper(sb.String())
 }
 
-func convertNameToEnv(name string, parentName *string, prefix string, nameMap map[string]int) string {
+func convertNameToEnv(name string, parentName *string, prefix string) string {
 	envName := formEnvName(name)
 	sb := strings.Builder{}
 	if prefix != "" {
@@ -37,7 +37,7 @@ func convertNameToEnv(name string, parentName *string, prefix string, nameMap ma
 		}
 	}
 
-	if num, ok := nameMap[envName]; ok && num > 1 && parentName != nil {
+	if parentName != nil {
 		sb.WriteString(*parentName)
 		sb.WriteString("_")
 	}

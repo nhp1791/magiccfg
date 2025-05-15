@@ -35,17 +35,12 @@ func makeFullConfig(
 	prefix string,
 	parentName *string,
 	envParentName *string,
-	nameMap map[string]int,
 ) reflect.Value {
 	if !recursiveStruct(c) {
 		return reflect.Zero(c.Type())
 	}
 
 	populateEmptyStructs(c)
-
-	if len(nameMap) == 0 {
-		nameMap = makeNameMap(c, prefix)
-	}
 
 	fields := make([]reflect.StructField, 0)
 	var newField reflect.StructField
@@ -65,12 +60,12 @@ func makeFullConfig(
 			newEnvParentName = formEnvName(name)
 		}
 
-		tag := buildTag(field.Tag, name, prefix, structField, parentName, envParentName, nameMap)
+		tag := buildTag(field.Tag, name, prefix, structField, parentName, envParentName)
 
 		fieldType := field.Type
 
 		if structField {
-			f := makeFullConfig(fld, prefix, &newParentName, &newEnvParentName, nameMap)
+			f := makeFullConfig(fld, prefix, &newParentName, &newEnvParentName)
 			fieldType = f.Type()
 		}
 
@@ -90,26 +85,6 @@ func makeFullConfig(
 	return newValue
 }
 
-func makeNameMap(cVal reflect.Value, prefix string) map[string]int {
-	c := reflect.Indirect(cVal)
-	nameMap := make(map[string]int)
-	for i := range c.NumField() {
-		field := c.Type().Field(i)
-		fld := c.Field(i)
-		name := field.Name
-		structField := recursiveStruct(fld)
-		if !structField {
-			nameMap[formEnvName(name)]++
-			continue
-		}
-		subMap := makeNameMap(fld, prefix)
-		for k := range subMap {
-			nameMap[k]++
-		}
-	}
-	return nameMap
-}
-
 func buildTag(
 	tag reflect.StructTag,
 	name string,
@@ -117,13 +92,12 @@ func buildTag(
 	structField bool,
 	parentName *string,
 	envParentName *string,
-	nameMap map[string]int,
 ) reflect.StructTag {
 	var sb strings.Builder
 
 	sb.WriteString(string(tag))
 	if !structField && tag.Get("env") == "" {
-		sb.WriteString(fmt.Sprintf(` env:"%s"`, convertNameToEnv(name, envParentName, prefix, nameMap)))
+		sb.WriteString(fmt.Sprintf(` env:"%s"`, convertNameToEnv(name, envParentName, prefix)))
 	}
 	if tag.Get("yaml") == "" {
 		sb.WriteString(fmt.Sprintf(` yaml:"%s"`, convertNameToYAML(name)))
@@ -136,6 +110,9 @@ func buildTag(
 	}
 	if !structField && tag.Get("long") == "" {
 		sb.WriteString(fmt.Sprintf(` long:"%s"`, convertNameToCommandLine(name, parentName)))
+	}
+	if tag.Get("description") == "" {
+		sb.WriteString(fmt.Sprintf(` description:"%s"`, name))
 	}
 
 	return reflect.StructTag(sb.String())
@@ -515,15 +492,17 @@ func getValues(c reflect.Value, arg string, args []string, i int, listSeparator 
 		nextArg = args[i+1]
 	}
 
+	if nextArg == "" || strings.HasPrefix(nextArg, "-") || strings.HasPrefix(nextArg, "--") {
+		return fixedArg, []string{}, false
+	}
+
 	values = extractValues(c, fixedArg, nextArg, listSeparator)
 	return fixedArg, values, true
 }
 
 func extractValues(c reflect.Value, arg string, valArg string, listSeparator string) []string {
 	values := []string{}
-	if valArg == "" || strings.HasPrefix(valArg, "-") || strings.HasPrefix(valArg, "--") {
-		return values
-	}
+
 	if !strings.Contains(valArg, listSeparator) || !verifySliceType(c, arg) {
 		values = append(values, valArg)
 		return values
@@ -684,11 +663,11 @@ func locateCLIFiles(options *Options, listSeparator string) ([]string, []string)
 	files := []string{}
 
 	shortPrefix := options.ConfigFileShort
-	if !strings.HasPrefix(shortPrefix, "-") {
+	if shortPrefix != "" && !strings.HasPrefix(shortPrefix, "-") {
 		shortPrefix = "-" + options.ConfigFileShort
 	}
 	longPrefix := options.ConfigFileLong
-	if !strings.HasPrefix(longPrefix, "--") {
+	if longPrefix != "" && !strings.HasPrefix(longPrefix, "--") {
 		longPrefix = "--" + options.ConfigFileLong
 	}
 
@@ -699,7 +678,8 @@ func locateCLIFiles(options *Options, listSeparator string) ([]string, []string)
 			skip = false
 			continue
 		}
-		if !strings.HasPrefix(arg, shortPrefix) && !strings.HasPrefix(arg, longPrefix) {
+		if (shortPrefix == "" || !strings.HasPrefix(arg, shortPrefix)) &&
+			(longPrefix == "" || !strings.HasPrefix(arg, longPrefix)) {
 			args = append(args, arg)
 			continue
 		}
