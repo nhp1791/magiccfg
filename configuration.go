@@ -8,9 +8,9 @@ import (
 
 	"github.com/caarlos0/env/v11"
 	"github.com/go-playground/validator/v10"
+	"github.com/goccy/go-yaml"
 	"github.com/jessevdk/go-flags"
 	"github.com/pelletier/go-toml/v2"
-	"gopkg.in/yaml.v3"
 )
 
 type magicConfig[T any] struct {
