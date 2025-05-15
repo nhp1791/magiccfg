@@ -2,6 +2,7 @@ package magiccfg
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"strconv"
 	"strings"
@@ -72,7 +73,7 @@ func makeFullConfig(
 			f := makeFullConfig(fld, prefix, &newParentName, &newEnvParentName, nameMap)
 			fieldType = f.Type()
 		}
-		println(tag)
+
 		newField = reflect.StructField{
 			Name: name,
 			Type: fieldType,
@@ -150,8 +151,7 @@ func populateEmptyStructs(c reflect.Value) {
 	for i := range cVal.NumField() {
 		field := cVal.Type().Field(i)
 		fld := cVal.Field(i)
-		name := field.Name
-		_ = name
+
 		if !recursiveStruct(fld) {
 			continue
 		}
@@ -194,8 +194,7 @@ func setDefaults(
 	for i := range val.NumField() {
 		fld := val.Field(i)
 		field := val.Type().Field(i)
-		name := field.Name
-		_ = name
+
 		if recursiveStruct(fld) {
 			setDefaults(fld, listSeparator, emptySliceIndicator, timeFormats)
 			continue
@@ -435,8 +434,7 @@ func validateEnums(c reflect.Value) []error {
 		if !ok {
 			continue
 		}
-		name := cVal.Type().Field(i).Name
-		_ = name
+
 		f := reflect.Indirect(fld)
 		if f.Type().Kind() == reflect.Slice {
 			for i := range f.Len() {
@@ -679,4 +677,48 @@ func createTimeSetter() func(reflect.Value, string, time.Time) bool {
 	}
 
 	return timeSetter
+}
+
+func locateCLIFiles(options *Options, listSeparator string) ([]string, []string) {
+	args := []string{}
+	files := []string{}
+
+	shortPrefix := options.ConfigFileShort
+	if !strings.HasPrefix(shortPrefix, "-") {
+		shortPrefix = "-" + options.ConfigFileShort
+	}
+	longPrefix := options.ConfigFileLong
+	if !strings.HasPrefix(longPrefix, "--") {
+		longPrefix = "--" + options.ConfigFileLong
+	}
+
+	skip := false
+
+	for i, arg := range os.Args {
+		if skip {
+			skip = false
+			continue
+		}
+		if !strings.HasPrefix(arg, shortPrefix) && !strings.HasPrefix(arg, longPrefix) {
+			args = append(args, arg)
+			continue
+		}
+
+		if strings.Contains(arg, "=") {
+			vals := strings.Split(arg, "=")
+			if len(vals) != 2 {
+				args = append(args, arg)
+				continue
+			}
+			files = append(files, strings.Split(vals[1], listSeparator)...)
+			continue
+		}
+
+		if i < len(os.Args)-1 {
+			nextArg := os.Args[i+1]
+			files = append(files, strings.Split(nextArg, listSeparator)...)
+			skip = true
+		}
+	}
+	return files, args
 }

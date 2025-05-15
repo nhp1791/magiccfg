@@ -2,13 +2,15 @@ package magiccfg
 
 import (
 	"fmt"
+	"os"
+	"reflect"
+	"strings"
+
 	"github.com/caarlos0/env/v11"
 	"github.com/go-playground/validator/v10"
 	"github.com/jessevdk/go-flags"
 	"github.com/pelletier/go-toml/v2"
 	"gopkg.in/yaml.v3"
-	"os"
-	"reflect"
 )
 
 type magicConfig[T any] struct {
@@ -21,9 +23,14 @@ type magicConfig[T any] struct {
 	transformFuncs      []func(reflect.StructField, reflect.Value)
 	timeFormats         []string
 	constructionErrors  []error
+	configFiles         []string
+	remainingArgs       []string
 }
 
-type MagicConfigOptions struct {
+type Options struct {
+	ConfigFileEnvName   string
+	ConfigFileShort     string
+	ConfigFileLong      string
 	Prefix              string
 	ListSeparator       string
 	EmptySliceIndicator string
@@ -32,7 +39,26 @@ type MagicConfigOptions struct {
 	TimeFormats         []string
 }
 
-func NewMagicConfig[T any](config *T, options *MagicConfigOptions) (*magicConfig[T], error) {
+func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error) {
+	listSeparator := ","
+	if options != nil && options.ListSeparator != "" {
+		listSeparator = options.ListSeparator
+	}
+
+	configFiles := []string{}
+	remainingArgs := os.Args
+	var cliFiles []string
+	if options.ConfigFileEnvName != "" {
+		fileEnv, ok := os.LookupEnv(options.ConfigFileEnvName)
+		if ok && fileEnv != "" {
+			configFiles = strings.Split(fileEnv, listSeparator)
+		}
+	}
+	if options.ConfigFileLong != "" || options.ConfigFileShort != "" {
+		cliFiles, remainingArgs = locateCLIFiles(options, listSeparator)
+		configFiles = append(configFiles, cliFiles...)
+	}
+
 	configVal := reflect.ValueOf(config)
 	if configVal.Kind() != reflect.Ptr || configVal.Elem().Kind() != reflect.Struct {
 		return nil, fmt.Errorf("config must be a pointer to a struct")
@@ -40,12 +66,7 @@ func NewMagicConfig[T any](config *T, options *MagicConfigOptions) (*magicConfig
 
 	prefix := ""
 	if options != nil {
-		prefix = options.Prefix
-	}
-
-	listSeparator := ","
-	if options != nil && options.ListSeparator != "" {
-		listSeparator = options.ListSeparator
+		prefix = strings.ToUpper(options.Prefix)
 	}
 
 	emptySliceIndicator := _emptyslice
@@ -84,6 +105,8 @@ func NewMagicConfig[T any](config *T, options *MagicConfigOptions) (*magicConfig
 		transformFuncs:      transformFuncs,
 		timeFormats:         timeFormats,
 		constructionErrors:  []error{},
+		remainingArgs:       remainingArgs,
+		configFiles:         configFiles,
 	}, nil
 }
 
@@ -94,8 +117,8 @@ func (c *magicConfig[T]) ParseEnv() *magicConfig[T] {
 	return c
 }
 
-func (c *magicConfig[T]) ParseFiles(files ...string) *magicConfig[T] {
-	for _, f := range files {
+func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
+	for _, f := range c.configFiles {
 		data, err := os.ReadFile(f)
 		if err != nil {
 			c.constructionErrors = append(c.constructionErrors, err)
@@ -129,7 +152,7 @@ func (c *magicConfig[T]) ParseFiles(files ...string) *magicConfig[T] {
 
 func (c *magicConfig[T]) ParseFlags() *magicConfig[T] {
 	parser := flags.NewParser(c.newConfig, flags.Default)
-	args := splitArgs(reflect.ValueOf(c.newConfig), os.Args, c.listSeparator)
+	args := splitArgs(reflect.ValueOf(c.newConfig), c.remainingArgs, c.listSeparator)
 	args = removeTimes(reflect.ValueOf(c.newConfig), args, c.timeFormats)
 	if _, err := parser.ParseArgs(args); err != nil {
 		c.constructionErrors = append(c.constructionErrors, err)
