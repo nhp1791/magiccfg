@@ -155,6 +155,9 @@ func (c *magicConfig[T]) ParseFlags() *magicConfig[T] {
 	args := splitArgs(reflect.ValueOf(c.newConfig), c.remainingArgs, c.listSeparator)
 	args = removeTimes(reflect.ValueOf(c.newConfig), args, c.timeFormats)
 	if _, err := parser.ParseArgs(args); err != nil {
+		if e, ok := err.(*flags.Error); ok && e.Type == flags.ErrHelp {
+			e.Message = "Help Menu Displayed"
+		}
 		c.constructionErrors = append(c.constructionErrors, err)
 	}
 
