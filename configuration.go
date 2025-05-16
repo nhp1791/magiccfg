@@ -14,29 +14,32 @@ import (
 )
 
 type magicConfig[T any] struct {
-	envPrefix           string
-	emptySliceIndicator string
-	listSeparator       string
-	originalConfig      *T
-	newConfig           any
-	validator           *validator.Validate
-	transformFuncs      []func(reflect.StructField, reflect.Value)
-	timeFormats         []string
-	constructionErrors  []error
-	configFiles         []string
-	remainingArgs       []string
+	envPrefix            string
+	emptySliceIndicator  string
+	listSeparator        string
+	ignoreUnknownOptions bool
+	originalConfig       *T
+	newConfig            any
+	validator            *validator.Validate
+	transformFuncs       []func(reflect.StructField, reflect.Value)
+	timeFormats          []string
+	constructionErrors   []error
+	configFiles          []string
+	configFileVars       map[string]string
+	remainingArgs        []string
 }
 
 type Options struct {
-	ConfigFileEnvName   string
-	ConfigFileShort     string
-	ConfigFileLong      string
-	Prefix              string
-	ListSeparator       string
-	EmptySliceIndicator string
-	ValidationFunctions map[string]ValidationFunction
-	TransformFuncs      []func(reflect.StructField, reflect.Value)
-	TimeFormats         []string
+	ConfigFileEnvName    string
+	ConfigFileShort      string
+	ConfigFileLong       string
+	Prefix               string
+	ListSeparator        string
+	EmptySliceIndicator  string
+	IgnoreUnknownOptions bool
+	ValidationFunctions  map[string]ValidationFunction
+	TransformFuncs       []func(reflect.StructField, reflect.Value)
+	TimeFormats          []string
 }
 
 func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error) {
@@ -74,6 +77,11 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 		emptySliceIndicator = options.EmptySliceIndicator
 	}
 
+	ignoreUnknownOptions := false
+	if options != nil {
+		ignoreUnknownOptions = options.IgnoreUnknownOptions
+	}
+
 	timeFormats := []string{}
 	if options != nil && options.TimeFormats != nil {
 		timeFormats = options.TimeFormats
@@ -93,20 +101,56 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 		transformFuncs = options.TransformFuncs
 	}
 
-	fullConfig := makeFullConfig(configVal, prefix, nil, nil).Interface()
+	fc, usages := makeFullConfig(configVal, prefix, nil, nil)
+	if options != nil {
+		usages["env"][options.ConfigFileEnvName]++
+		usages["long"][options.ConfigFileLong]++
+		usages["short"][options.ConfigFileShort]++
+	}
+	conflict := false
+	var sb strings.Builder
+	sb.WriteString("Cannot construct configurationation due to the following conflicts:")
+	for key, v := range usages {
+		for k, n := range v {
+			if k != "" && n > 1 {
+				conflict = true
+				sb.WriteString(fmt.Sprintf("\n%s variable %s defined %d times", key, k, n))
+			}
+			if key == "short" && k == "h" && n > 0 {
+				conflict = true
+				sb.WriteString(fmt.Sprintf("\nshort variable h conflicts with help"))
+			}
+			if key == "long" && k == "help" && n > 0 {
+				conflict = true
+				sb.WriteString(fmt.Sprintf("\nlong variable help conflicts with help"))
+			}
+		}
+	}
+
+	if conflict {
+		return nil, fmt.Errorf(sb.String())
+	}
+
+	fullConfig := fc.Interface()
 
 	return &magicConfig[T]{
-		originalConfig:      config,
-		newConfig:           fullConfig,
-		envPrefix:           prefix,
-		listSeparator:       listSeparator,
-		emptySliceIndicator: emptySliceIndicator,
-		validator:           vd,
-		transformFuncs:      transformFuncs,
-		timeFormats:         timeFormats,
-		constructionErrors:  []error{},
-		remainingArgs:       remainingArgs,
-		configFiles:         configFiles,
+		originalConfig:       config,
+		newConfig:            fullConfig,
+		envPrefix:            prefix,
+		listSeparator:        listSeparator,
+		emptySliceIndicator:  emptySliceIndicator,
+		ignoreUnknownOptions: ignoreUnknownOptions,
+		validator:            vd,
+		transformFuncs:       transformFuncs,
+		timeFormats:          timeFormats,
+		constructionErrors:   []error{},
+		remainingArgs:        remainingArgs,
+		configFiles:          configFiles,
+		configFileVars: map[string]string{
+			"env":   options.ConfigFileEnvName,
+			"short": options.ConfigFileShort,
+			"long":  options.ConfigFileLong,
+		},
 	}, nil
 }
 
@@ -151,7 +195,12 @@ func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
 }
 
 func (c *magicConfig[T]) ParseFlags() *magicConfig[T] {
-	parser := flags.NewParser(c.newConfig, flags.Default)
+	var parser *flags.Parser
+	if c.ignoreUnknownOptions {
+		parser = flags.NewParser(parser, flags.Default|flags.IgnoreUnknown)
+	} else {
+		parser = flags.NewParser(c.newConfig, flags.Default)
+	}
 	args := splitArgs(reflect.ValueOf(c.newConfig), c.remainingArgs, c.listSeparator)
 	args = removeTimes(reflect.ValueOf(c.newConfig), args, c.timeFormats)
 	if _, err := parser.ParseArgs(args); err != nil {

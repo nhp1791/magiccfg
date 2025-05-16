@@ -35,9 +35,15 @@ func makeFullConfig(
 	prefix string,
 	parentName *string,
 	envParentName *string,
-) reflect.Value {
+) (reflect.Value, map[string]map[string]int) {
+	usages := map[string]map[string]int{
+		"env":   map[string]int{},
+		"long":  map[string]int{},
+		"short": map[string]int{},
+	}
+
 	if !recursiveStruct(c) {
-		return reflect.Zero(c.Type())
+		return reflect.Zero(c.Type()), usages
 	}
 
 	populateEmptyStructs(c)
@@ -65,8 +71,17 @@ func makeFullConfig(
 		fieldType := field.Type
 
 		if structField {
-			f := makeFullConfig(fld, prefix, &newParentName, &newEnvParentName)
+			f, subUsages := makeFullConfig(fld, prefix, &newParentName, &newEnvParentName)
 			fieldType = f.Type()
+			for key, v := range subUsages {
+				for k, n := range v {
+					usages[key][k] += n
+				}
+			}
+		} else {
+			usages["env"][tag.Get("env")]++
+			usages["short"][tag.Get("short")]++
+			usages["long"][tag.Get("long")]++
 		}
 
 		newField = reflect.StructField{
@@ -82,7 +97,7 @@ func makeFullConfig(
 	newValue := reflect.New(structType)
 
 	populateEmptyStructs(newValue)
-	return newValue
+	return newValue, usages
 }
 
 func buildTag(
@@ -412,11 +427,19 @@ func validateEnums(c reflect.Value) []error {
 			continue
 		}
 
+		mt := m.Type
+		if mt.NumIn() != 1 || mt.NumOut() != 1 {
+			continue
+		}
+		if mt.Out(0).Kind() != reflect.Bool {
+			continue
+		}
+
 		f := reflect.Indirect(fld)
 		if f.Type().Kind() == reflect.Slice {
 			for i := range f.Len() {
 				element := f.Index(i)
-				e := m.Func.Call([]reflect.Value{element, reflect.ValueOf(element.String())})
+				e := m.Func.Call([]reflect.Value{element})
 				if len(e) > 0 {
 					v, ok := e[0].Interface().(bool)
 					if ok && !v {
@@ -425,7 +448,7 @@ func validateEnums(c reflect.Value) []error {
 				}
 			}
 		} else {
-			e := m.Func.Call([]reflect.Value{f, reflect.ValueOf(f.String())})
+			e := m.Func.Call([]reflect.Value{f})
 			if len(e) > 0 {
 				v, ok := e[0].Interface().(bool)
 				if ok && !v {

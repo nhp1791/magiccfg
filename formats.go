@@ -7,7 +7,6 @@ func formEnvName(name string) string {
 	runes := []rune(name)
 	size := len(runes)
 	for idx, rn := range runes {
-
 		if isCapital(rn) &&
 			idx > 0 &&
 			idx < size-1 &&
