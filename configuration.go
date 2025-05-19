@@ -9,17 +9,19 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/BurntSushi/toml"
 	"github.com/caarlos0/env/v11"
 	"github.com/go-playground/validator/v10"
 	"github.com/goccy/go-yaml"
 	"github.com/jessevdk/go-flags"
-	"github.com/pelletier/go-toml/v2"
 )
 
 type magicConfig[T any] struct {
 	envPrefix            string
 	emptySliceIndicator  string
+	emptyMapIndicator    string
 	listSeparator        string
+	keyValueSeparator    string
 	ignoreUnknownOptions bool
 	originalConfig       *T
 	newConfig            any
@@ -38,7 +40,9 @@ type Options struct {
 	ConfigFileLong       string
 	Prefix               string
 	ListSeparator        string
+	KeyValueSeparator    string
 	EmptySliceIndicator  string
+	EmptyMapIndicator    string
 	IgnoreUnknownOptions bool
 	ValidationFunctions  map[string]ValidationFunction
 	TransformFuncs       []func(reflect.StructField, reflect.Value)
@@ -78,6 +82,16 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 	emptySliceIndicator := _emptyslice
 	if options != nil && options.EmptySliceIndicator != "" {
 		emptySliceIndicator = options.EmptySliceIndicator
+	}
+
+	emptyMapIndicator := _emptymap
+	if options != nil && options.EmptyMapIndicator != "" {
+		emptyMapIndicator = options.EmptyMapIndicator
+	}
+
+	keyValueSeparator := ":"
+	if options != nil && options.KeyValueSeparator != "" {
+		keyValueSeparator = options.KeyValueSeparator
 	}
 
 	ignoreUnknownOptions := false
@@ -142,7 +156,9 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 		newConfig:            fullConfig,
 		envPrefix:            prefix,
 		listSeparator:        listSeparator,
+		keyValueSeparator:    keyValueSeparator,
 		emptySliceIndicator:  emptySliceIndicator,
+		emptyMapIndicator:    emptyMapIndicator,
 		ignoreUnknownOptions: ignoreUnknownOptions,
 		validator:            vd,
 		transformFuncs:       transformFuncs,
@@ -164,7 +180,6 @@ func (c *magicConfig[T]) ParseEnv() *magicConfig[T] {
 		c.constructionErrors = append(c.constructionErrors, err)
 	}
 	merge(reflect.ValueOf(c.newConfig), reflect.ValueOf(newConfig))
-	spew.Dump(c.newConfig)
 	return c
 }
 
@@ -202,10 +217,11 @@ func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
 			if err := toml.Unmarshal(data, nc); err != nil {
 				c.constructionErrors = append(c.constructionErrors, err)
 			}
+			spew.Dump(nc)
+
 		}
 		merge(reflect.ValueOf(newConfig), reflect.ValueOf(nc))
 	}
-
 	merge(reflect.ValueOf(c.newConfig), reflect.ValueOf(newConfig))
 	return c
 }
@@ -218,7 +234,6 @@ func (c *magicConfig[T]) ParseFlags() *magicConfig[T] {
 		parser = flags.NewParser(c.newConfig, flags.Default)
 	}
 	args := splitArgs(reflect.ValueOf(c.newConfig), c.remainingArgs, c.listSeparator)
-	args = removeTimes(reflect.ValueOf(c.newConfig), args, c.timeFormats)
 	if _, err := parser.ParseArgs(args); err != nil {
 		if e, ok := err.(*flags.Error); ok && e.Type == flags.ErrHelp {
 			e.Message = "Help Menu Displayed"
@@ -245,7 +260,9 @@ func (c *magicConfig[T]) ApplyDefaults() *magicConfig[T] {
 	setDefaults(
 		reflect.ValueOf(c.newConfig),
 		c.listSeparator,
+		c.keyValueSeparator,
 		c.emptySliceIndicator,
+		c.emptyMapIndicator,
 		c.timeFormats,
 	)
 	return c

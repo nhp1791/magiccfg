@@ -2,6 +2,7 @@ package magiccfg
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"reflect"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 
 const (
 	_emptyslice = "emptyslice"
+	_emptymap   = "emptymap"
 )
 
 func (c *magicConfig[T]) empty() reflect.Value {
@@ -24,7 +26,9 @@ func recursiveStruct(c reflect.Value) bool {
 	return c.Kind() == reflect.Ptr &&
 		cType.Elem().Kind() == reflect.Struct &&
 		cType != timePtrType &&
-		cType != xmlTimePtrType
+		cType != xmlTimePtrType &&
+		cType != urlType &&
+		cType != xmlURLType
 }
 
 func makeFullConfig(
@@ -75,6 +79,10 @@ func makeFullConfig(
 			fieldType = xmlTimePtrType
 		case sliceTimeType:
 			fieldType = sliceXMLTimeType
+		case urlType:
+			fieldType = xmlURLType
+		case sliceURLType:
+			fieldType = sliceXMLURLType
 		}
 
 		if structField {
@@ -233,6 +241,27 @@ func merge(oldV, newV reflect.Value) {
 				} else {
 					targetField.Set(sourceField)
 				}
+			case xmlURLType:
+				if targetFieldType == urlType {
+					targetField.Set(sourceField.Convert(urlType))
+				} else {
+					targetField.Set(sourceField)
+				}
+			case sliceXMLURLType:
+				if targetFieldType == sliceURLType {
+					newURLs := sourceField.Interface().([]*XMLURL)
+					urls := make([]*url.URL, len(newURLs))
+					for i, nu := range newURLs {
+						if nu == nil {
+							continue
+						}
+						u := url.URL(*nu)
+						urls[i] = &u
+					}
+					targetField.Set(reflect.ValueOf(urls))
+				} else {
+					targetField.Set(sourceField)
+				}
 			default:
 				targetField.Set(sourceField)
 			}
@@ -257,19 +286,22 @@ func isCapital(v rune) bool {
 func setDefaults(
 	v reflect.Value,
 	listSeparator string,
+	keyValueSeparator string,
 	emptySliceIndicator string,
+	emptyMapIndicator string,
 	timeFormats []string,
 ) {
 	val := reflect.Indirect(v)
 	for i := range val.NumField() {
 		fld := val.Field(i)
 		field := val.Type().Field(i)
-
+		name := field.Name
+		_ = name
 		if recursiveStruct(fld) {
-			setDefaults(fld, listSeparator, emptySliceIndicator, timeFormats)
+			setDefaults(fld, listSeparator, keyValueSeparator, emptySliceIndicator, emptyMapIndicator, timeFormats)
 			continue
 		}
-		if !fld.IsNil() {
+		if !fld.IsNil() && (fld.Type().Kind() != reflect.Map || fld.Len() > 0) {
 			continue
 		}
 
@@ -277,7 +309,9 @@ func setDefaults(
 
 		tag := field.Tag.Get("def")
 		if tag != "" {
-			if fld.Type().Kind() == reflect.Slice {
+			if fld.Type().Kind() == reflect.Map {
+				fld.Set(reflect.MakeMap(fld.Type()))
+			} else if fld.Type().Kind() == reflect.Slice {
 				fld.Set(reflect.MakeSlice(f.Type(), 0, 0))
 			} else {
 				if fld.Kind() == reflect.Ptr {
@@ -310,24 +344,30 @@ func setDefaults(
 							}
 						}
 						continue
+					case urlType:
+						if u, err := url.Parse(tag); err == nil {
+							fld.Set(reflect.ValueOf(u))
+						}
+						continue
 					}
 				}
 				fld.Set(reflect.New(field.Type.Elem()))
-
 			}
 
 			f := reflect.Indirect(fld)
 
-			SetValue(f, tag, listSeparator, emptySliceIndicator, timeFormats)
+			setFieldValue(f, tag, listSeparator, keyValueSeparator, emptySliceIndicator, emptyMapIndicator, timeFormats)
 		}
 	}
 }
 
-func SetValue(
+func setFieldValue(
 	f reflect.Value,
 	val string,
 	listSeparator string,
+	keyValueSeparator string,
 	emptySliceIndicator string,
+	emptyMapIndicator string,
 	timeFormats []string,
 ) {
 	switch f.Type().Kind() {
@@ -355,6 +395,76 @@ func SetValue(
 		}
 		c := reflect.ValueOf(b).Convert(f.Type())
 		f.Set(c)
+	case reflect.Map:
+		kvs := []string{}
+		vals := map[string]string{}
+		if val != emptyMapIndicator {
+			kvs = strings.Split(val, listSeparator)
+		}
+		for _, kv := range kvs {
+			mapVals := strings.Split(kv, keyValueSeparator)
+			if len(mapVals) != 2 {
+				continue
+			}
+			vals[mapVals[0]] = mapVals[1]
+		}
+		c := reflect.MakeMap(f.Type())
+		elemType := reflect.TypeOf(f.Interface()).Elem()
+		elemKind := elemType.Kind()
+		switch elemType {
+		case durationPtrType:
+			for k, v := range vals {
+				if d, err := time.ParseDuration(v); err == nil {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(&d))
+				}
+			}
+			f.Set(c)
+			return
+		case timePtrType:
+			for k, v := range vals {
+				for _, timeFormat := range timeFormats {
+					if t, err := time.Parse(timeFormat, v); err == nil {
+						c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(&t))
+						break
+					}
+				}
+			}
+			f.Set(c)
+			return
+		case urlType:
+			for k, v := range vals {
+				if u, err := url.Parse(v); err == nil {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(u))
+				}
+			}
+			f.Set(c)
+			return
+		}
+		for k, v := range vals {
+			switch elemKind {
+			case reflect.String:
+				c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(v).Convert(f.Type().Elem()))
+			case reflect.Bool:
+				b, err := strconv.ParseBool(v)
+				if err != nil {
+					continue
+				}
+				c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(b).Convert(elemType))
+			case reflect.Int, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int8, reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint8:
+				i, err := strconv.ParseInt(v, 10, 0)
+				if err != nil {
+					continue
+				}
+				c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(i).Convert(elemType))
+			case reflect.Float32, reflect.Float64:
+				v, err := strconv.ParseFloat(val, 64)
+				if err != nil {
+					return
+				}
+				c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(v).Convert(elemType))
+			}
+		}
+		f.Set(c)
 	case reflect.Slice:
 		vals := []string{}
 		if val != emptySliceIndicator {
@@ -379,6 +489,14 @@ func SetValue(
 						c = reflect.Append(c, reflect.ValueOf(&t))
 						break
 					}
+				}
+			}
+			f.Set(c)
+			return
+		case urlType:
+			for _, v := range vals {
+				if u, err := url.Parse(v); err == nil {
+					c = reflect.Append(c, reflect.ValueOf(u))
 				}
 			}
 			f.Set(c)
@@ -428,7 +546,7 @@ func transformValues(c reflect.Value, customFuncs []func(reflect.StructField, re
 		adjustCase(field, fld)
 		stripslash(field, fld)
 		addslash(field, fld)
-		stripprotocol(field, fld)
+		stripscheme(field, fld)
 
 		for _, customFunc := range customFuncs {
 			customFunc(field, fld)
@@ -472,6 +590,17 @@ func validateEnums(c reflect.Value) []error {
 		if f.Type().Kind() == reflect.Slice {
 			for i := range f.Len() {
 				element := f.Index(i)
+				e := m.Func.Call([]reflect.Value{element})
+				if len(e) > 0 {
+					v, ok := e[0].Interface().(bool)
+					if ok && !v {
+						errs = append(errs, fmt.Errorf("value %s for enum field '%s' is not valid", element.String(), t.Name()))
+					}
+				}
+			}
+		} else if f.Type().Kind() == reflect.Map {
+			for _, k := range f.MapKeys() {
+				element := f.MapIndex(k)
 				e := m.Func.Call([]reflect.Value{element})
 				if len(e) > 0 {
 					v, ok := e[0].Interface().(bool)
@@ -598,120 +727,6 @@ func verifySliceType(c reflect.Value, arg string) bool {
 
 	}
 	return false
-}
-
-func removeTimes(
-	c reflect.Value,
-	args []string,
-	timeFormats []string,
-) []string {
-	newArgs := []string{}
-
-	skip := false
-	timeSetter := createTimeSetter()
-
-	for i, arg := range args {
-		if skip {
-			skip = false
-			continue
-		}
-		if !strings.HasPrefix(arg, "--") && !strings.HasPrefix(arg, "-") {
-			newArgs = append(newArgs, arg)
-			continue
-		}
-
-		var write bool
-		write, skip = lookForTimes(c, arg, args, i, timeFormats, timeSetter)
-		if write {
-			newArgs = append(newArgs, arg)
-		}
-	}
-
-	return newArgs
-}
-
-func lookForTimes(
-	c reflect.Value,
-	arg string,
-	args []string,
-	i int,
-	timeFormats []string,
-	timeSetter func(reflect.Value, string, time.Time) bool,
-) (write bool, skip bool) {
-	var t time.Time
-	var err error
-
-	nextArg := ""
-	if i < len(args)-1 {
-		nextArg = args[i+1]
-	}
-
-	if nextArg == "" || strings.HasPrefix(nextArg, "-") || strings.HasPrefix(nextArg, "--") {
-		return true, false
-	}
-
-	for _, timeFormat := range timeFormats {
-		t, err = time.Parse(timeFormat, nextArg)
-		if err != nil {
-			continue
-		}
-		if !t.IsZero() && timeSetter(c, arg, t) {
-			return false, true
-		}
-	}
-
-	return true, false
-}
-
-func createTimeSetter() func(reflect.Value, string, time.Time) bool {
-	initialized := false
-
-	var timeSetter func(c reflect.Value, arg string, t time.Time) bool
-
-	timeSetter = func(c reflect.Value, arg string, t time.Time) bool {
-		if !recursiveStruct(c) {
-			return false
-		}
-		bareArg := strings.TrimPrefix(strings.TrimPrefix(arg, "-"), "-")
-		cVal := reflect.Indirect(c)
-		for i := range cVal.NumField() {
-			field := cVal.Type().Field(i)
-			fld := cVal.Field(i)
-			if recursiveStruct(fld) {
-				if timeSetter(fld, arg, t) {
-					return true
-				}
-				continue
-			}
-
-			shortTag := field.Tag.Get("short")
-			longTag := field.Tag.Get("long")
-
-			if shortTag != bareArg && longTag != bareArg {
-				continue
-			}
-
-			if fld.Type() == timePtrType {
-				fld.Set(reflect.ValueOf(&t))
-				return true
-			}
-			f := reflect.Indirect(fld)
-
-			elemType := reflect.TypeOf(f.Interface()).Elem()
-			if fld.Type().Kind() == reflect.Slice && elemType == timePtrType {
-				if fld.IsNil() || !initialized {
-					fld.Set(reflect.MakeSlice(f.Type(), 0, 0))
-					initialized = true
-				}
-				c := reflect.Append(fld, reflect.ValueOf(&t))
-				fld.Set(c)
-				return true
-			}
-		}
-		return false
-	}
-
-	return timeSetter
 }
 
 func locateCLIFiles(options *Options, listSeparator string) ([]string, []string) {

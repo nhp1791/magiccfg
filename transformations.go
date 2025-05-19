@@ -86,14 +86,14 @@ func addslash(field reflect.StructField, fld reflect.Value) {
 	f.Set(c)
 }
 
-// stripprotocol looks for the tag `stripprotocol:""` (note that the value is ignored).
+// stripscheme looks for the tag `stripscheme:""` (note that the value is ignored).
 // If present, any common network protocol prefixes will be removed.  This is useful for
 // server names/addresses so that code using the configuration variable can be assured
 // of its form and need not make its own checks.
-func stripprotocol(field reflect.StructField, fld reflect.Value) {
+func stripscheme(field reflect.StructField, fld reflect.Value) {
 	f := reflect.Indirect(fld)
 
-	if _, ok := field.Tag.Lookup("stripprotocol"); !ok || f.Kind() != reflect.String {
+	if _, ok := field.Tag.Lookup("stripscheme"); !ok || f.Kind() != reflect.String {
 		return
 	}
 
