@@ -1,6 +1,7 @@
 package magiccfg
 
 import (
+	"encoding/xml"
 	"fmt"
 	"os"
 	"reflect"
@@ -14,9 +15,50 @@ const (
 )
 
 var (
-	timePtrType     = reflect.TypeOf(new(time.Time))
-	durationPtrType = reflect.TypeOf(new(time.Duration))
+	durationPtrType          = reflect.TypeOf(new(time.Duration))
+	sliceDurationType        = reflect.TypeOf([]*time.Duration{})
+	xmlTimeDurationPtrType   = reflect.TypeOf(new(XMLTimeDuration))
+	sliceXMLTimeDurationType = reflect.TypeOf([]*XMLTimeDuration{})
+	timePtrType              = reflect.TypeOf(new(time.Time))
+	xmlTimePtrType           = reflect.TypeOf(new(XMLTime))
+	sliceTimeType            = reflect.TypeOf([]*time.Time{})
+	sliceXMLTimeType         = reflect.TypeOf([]*XMLTime{})
+	packageTimeFormats       []string
 )
+
+type XMLTimeDuration time.Duration
+
+func (x *XMLTimeDuration) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var s string
+	if err := d.DecodeElement(&s, &start); err != nil {
+		return err
+	}
+	dur, err := time.ParseDuration(s)
+	if err != nil {
+		return err
+	}
+	*x = XMLTimeDuration(dur)
+	return nil
+}
+
+type XMLTime time.Time
+
+func (x *XMLTime) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var s string
+	if err := d.DecodeElement(&s, &start); err != nil {
+		return err
+	}
+	if packageTimeFormats != nil {
+		for _, v := range packageTimeFormats {
+			t, err := time.Parse(v, s)
+			if err == nil {
+				*x = XMLTime(t)
+				return nil
+			}
+		}
+	}
+	return fmt.Errorf("Could not parse XML time: %s", s)
+}
 
 func (c *magicConfig[T]) empty() reflect.Value {
 	newC := reflect.New(reflect.TypeOf(c.newConfig).Elem())
@@ -25,9 +67,11 @@ func (c *magicConfig[T]) empty() reflect.Value {
 }
 
 func recursiveStruct(c reflect.Value) bool {
+	cType := c.Type()
 	return c.Kind() == reflect.Ptr &&
-		c.Type().Elem().Kind() == reflect.Struct &&
-		c.Type() != timePtrType
+		cType.Elem().Kind() == reflect.Struct &&
+		cType != timePtrType &&
+		cType != xmlTimePtrType
 }
 
 func makeFullConfig(
@@ -69,6 +113,16 @@ func makeFullConfig(
 		tag := buildTag(field.Tag, name, prefix, structField, parentName, envParentName)
 
 		fieldType := field.Type
+		switch fld.Type() {
+		case durationPtrType:
+			fieldType = xmlTimeDurationPtrType
+		case sliceDurationType:
+			fieldType = sliceXMLTimeDurationType
+		case timePtrType:
+			fieldType = xmlTimePtrType
+		case sliceTimeType:
+			fieldType = sliceXMLTimeType
+		}
 
 		if structField {
 			f, subUsages := makeFullConfig(fld, prefix, &newParentName, &newEnvParentName)
@@ -127,7 +181,20 @@ func buildTag(
 		sb.WriteString(fmt.Sprintf(` long:"%s"`, convertNameToCommandLine(name, parentName)))
 	}
 	if tag.Get("description") == "" {
-		sb.WriteString(fmt.Sprintf(` description:"%s"`, name))
+		sb.WriteString(fmt.Sprintf(` description:"%s: yaml/json/toml/xml: %s"`, name, convertNameToYAML(name)))
+	}
+	if tag.Get("xml") == "" {
+		attr := false
+		if tag.Get("xmlattr") != "" {
+			if a, err := strconv.ParseBool(tag.Get("xmlattr")); err == nil {
+				attr = a
+			}
+		}
+		sb.WriteString(fmt.Sprintf(` xml:"%s`, convertNameToYAML(name)))
+		if attr {
+			sb.WriteString(`,attr`)
+		}
+		sb.WriteString(`"`)
 	}
 
 	return reflect.StructTag(sb.String())
@@ -167,7 +234,36 @@ func merge(oldV, newV reflect.Value) {
 		}
 
 		if !nFld.IsNil() && fld.CanSet() {
-			fld.Set(nFld)
+			switch nFld.Type() {
+			case xmlTimeDurationPtrType:
+				fld.Set(nFld.Convert(durationPtrType))
+			case sliceXMLTimeDurationType:
+				newDurations := nFld.Interface().([]*XMLTimeDuration)
+				durations := make([]*time.Duration, len(newDurations))
+				for i, nd := range newDurations {
+					if nd == nil {
+						continue
+					}
+					d := time.Duration(*nd)
+					durations[i] = &d
+				}
+				fld.Set(reflect.ValueOf(durations))
+			case xmlTimePtrType:
+				fld.Set(nFld.Convert(timePtrType))
+			case sliceXMLTimeType:
+				newTimes := nFld.Interface().([]*XMLTime)
+				times := make([]*time.Time, len(newTimes))
+				for i, nt := range newTimes {
+					if nt == nil {
+						continue
+					}
+					t := time.Time(*nt)
+					times[i] = &t
+				}
+				fld.Set(reflect.ValueOf(times))
+			default:
+				fld.Set(nFld)
+			}
 		}
 	}
 }

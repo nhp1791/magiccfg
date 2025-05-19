@@ -1,6 +1,8 @@
+// Package magiccfg provides
 package magiccfg
 
 import (
+	"encoding/xml"
 	"fmt"
 	"os"
 	"reflect"
@@ -86,6 +88,7 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 	if options != nil && options.TimeFormats != nil {
 		timeFormats = options.TimeFormats
 	}
+	packageTimeFormats = timeFormats
 
 	vd := validator.New(validator.WithRequiredStructEnabled())
 	if options != nil {
@@ -172,10 +175,16 @@ func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
 		test := map[string]any{}
 
 		isYAML := true
+		isXML := false
 		if err := yaml.Unmarshal(data, &test); err != nil {
 			if err := toml.Unmarshal(data, &test); err != nil {
-				c.constructionErrors = append(c.constructionErrors, fmt.Errorf("failed to recognize file %s as YAML, JSON, or TOML", f))
-				continue
+				if err := xml.Unmarshal(data, c.newConfig); err != nil {
+					println(err.Error())
+					c.constructionErrors = append(c.constructionErrors, fmt.Errorf("failed to recognize file %s as YAML, JSON, TOML, or XML", f))
+					continue
+				} else {
+					isXML = true
+				}
 			}
 			isYAML = false
 		}
@@ -184,7 +193,7 @@ func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
 			if err := yaml.Unmarshal(data, c.newConfig); err != nil {
 				c.constructionErrors = append(c.constructionErrors, err)
 			}
-		} else {
+		} else if !isXML {
 			if err := toml.Unmarshal(data, c.newConfig); err != nil {
 				c.constructionErrors = append(c.constructionErrors, err)
 			}
