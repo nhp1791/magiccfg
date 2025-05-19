@@ -1,7 +1,6 @@
 package magiccfg
 
 import (
-	"encoding/xml"
 	"fmt"
 	"os"
 	"reflect"
@@ -13,52 +12,6 @@ import (
 const (
 	_emptyslice = "emptyslice"
 )
-
-var (
-	durationPtrType          = reflect.TypeOf(new(time.Duration))
-	sliceDurationType        = reflect.TypeOf([]*time.Duration{})
-	xmlTimeDurationPtrType   = reflect.TypeOf(new(XMLTimeDuration))
-	sliceXMLTimeDurationType = reflect.TypeOf([]*XMLTimeDuration{})
-	timePtrType              = reflect.TypeOf(new(time.Time))
-	xmlTimePtrType           = reflect.TypeOf(new(XMLTime))
-	sliceTimeType            = reflect.TypeOf([]*time.Time{})
-	sliceXMLTimeType         = reflect.TypeOf([]*XMLTime{})
-	packageTimeFormats       []string
-)
-
-type XMLTimeDuration time.Duration
-
-func (x *XMLTimeDuration) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
-	var s string
-	if err := d.DecodeElement(&s, &start); err != nil {
-		return err
-	}
-	dur, err := time.ParseDuration(s)
-	if err != nil {
-		return err
-	}
-	*x = XMLTimeDuration(dur)
-	return nil
-}
-
-type XMLTime time.Time
-
-func (x *XMLTime) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
-	var s string
-	if err := d.DecodeElement(&s, &start); err != nil {
-		return err
-	}
-	if packageTimeFormats != nil {
-		for _, v := range packageTimeFormats {
-			t, err := time.Parse(v, s)
-			if err == nil {
-				*x = XMLTime(t)
-				return nil
-			}
-		}
-	}
-	return fmt.Errorf("Could not parse XML time: %s", s)
-}
 
 func (c *magicConfig[T]) empty() reflect.Value {
 	newC := reflect.New(reflect.TypeOf(c.newConfig).Elem())
