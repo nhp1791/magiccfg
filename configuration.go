@@ -4,6 +4,7 @@ package magiccfg
 import (
 	"encoding/xml"
 	"fmt"
+	"github.com/davecgh/go-spew/spew"
 	"os"
 	"reflect"
 	"strings"
@@ -158,13 +159,17 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 }
 
 func (c *magicConfig[T]) ParseEnv() *magicConfig[T] {
-	if err := env.Parse(c.newConfig); err != nil {
+	newConfig := c.empty().Interface()
+	if err := env.Parse(newConfig); err != nil {
 		c.constructionErrors = append(c.constructionErrors, err)
 	}
+	merge(reflect.ValueOf(c.newConfig), reflect.ValueOf(newConfig))
+	spew.Dump(c.newConfig)
 	return c
 }
 
 func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
+	newConfig := c.empty().Interface()
 	for _, f := range c.configFiles {
 		data, err := os.ReadFile(f)
 		if err != nil {
@@ -173,12 +178,12 @@ func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
 		}
 
 		test := map[string]any{}
-
+		nc := c.empty().Interface()
 		isYAML := true
 		isXML := false
 		if err := yaml.Unmarshal(data, &test); err != nil {
 			if err := toml.Unmarshal(data, &test); err != nil {
-				if err := xml.Unmarshal(data, c.newConfig); err != nil {
+				if err := xml.Unmarshal(data, nc); err != nil {
 					println(err.Error())
 					c.constructionErrors = append(c.constructionErrors, fmt.Errorf("failed to recognize file %s as YAML, JSON, TOML, or XML", f))
 					continue
@@ -190,23 +195,25 @@ func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
 		}
 
 		if isYAML {
-			if err := yaml.Unmarshal(data, c.newConfig); err != nil {
+			if err := yaml.Unmarshal(data, nc); err != nil {
 				c.constructionErrors = append(c.constructionErrors, err)
 			}
 		} else if !isXML {
-			if err := toml.Unmarshal(data, c.newConfig); err != nil {
+			if err := toml.Unmarshal(data, nc); err != nil {
 				c.constructionErrors = append(c.constructionErrors, err)
 			}
 		}
+		merge(reflect.ValueOf(newConfig), reflect.ValueOf(nc))
 	}
 
+	merge(reflect.ValueOf(c.newConfig), reflect.ValueOf(newConfig))
 	return c
 }
 
 func (c *magicConfig[T]) ParseFlags() *magicConfig[T] {
 	var parser *flags.Parser
 	if c.ignoreUnknownOptions {
-		parser = flags.NewParser(parser, flags.Default|flags.IgnoreUnknown)
+		parser = flags.NewParser(c.newConfig, flags.Default|flags.IgnoreUnknown)
 	} else {
 		parser = flags.NewParser(c.newConfig, flags.Default)
 	}

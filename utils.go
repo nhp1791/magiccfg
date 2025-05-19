@@ -176,48 +176,77 @@ func populateEmptyStructs(c reflect.Value) {
 }
 
 func merge(oldV, newV reflect.Value) {
-	o := reflect.Indirect(oldV)
-	n := reflect.Indirect(newV)
-	for i := range o.NumField() {
-		fld := o.Field(i)
-		nFld := n.Field(i)
-		if recursiveStruct(fld) {
-			merge(fld, nFld)
+	target := reflect.Indirect(oldV)
+	source := reflect.Indirect(newV)
+	for i := range target.NumField() {
+		targetField := target.Field(i)
+		sourceField := source.Field(i)
+		name := target.Type().Field(i).Name
+		_ = name
+		if recursiveStruct(targetField) {
+			merge(targetField, sourceField)
 			continue
 		}
 
-		if !nFld.IsNil() && fld.CanSet() {
-			switch nFld.Type() {
+		if !isZero(sourceField) && targetField.CanSet() {
+			targetFieldType := targetField.Type()
+			switch sourceField.Type() {
 			case xmlTimeDurationPtrType:
-				fld.Set(nFld.Convert(durationPtrType))
+				if targetFieldType == durationPtrType {
+					targetField.Set(sourceField.Convert(durationPtrType))
+				} else {
+					targetField.Set(sourceField)
+				}
 			case sliceXMLTimeDurationType:
-				newDurations := nFld.Interface().([]*XMLTimeDuration)
-				durations := make([]*time.Duration, len(newDurations))
-				for i, nd := range newDurations {
-					if nd == nil {
-						continue
+				if targetFieldType == sliceDurationType {
+					newDurations := sourceField.Interface().([]*XMLTimeDuration)
+					durations := make([]*time.Duration, len(newDurations))
+					for i, nd := range newDurations {
+						if nd == nil {
+							continue
+						}
+						d := time.Duration(*nd)
+						durations[i] = &d
 					}
-					d := time.Duration(*nd)
-					durations[i] = &d
+					targetField.Set(reflect.ValueOf(durations))
+				} else {
+					targetField.Set(sourceField)
 				}
-				fld.Set(reflect.ValueOf(durations))
 			case xmlTimePtrType:
-				fld.Set(nFld.Convert(timePtrType))
-			case sliceXMLTimeType:
-				newTimes := nFld.Interface().([]*XMLTime)
-				times := make([]*time.Time, len(newTimes))
-				for i, nt := range newTimes {
-					if nt == nil {
-						continue
-					}
-					t := time.Time(*nt)
-					times[i] = &t
+				if targetFieldType == timePtrType {
+					targetField.Set(sourceField.Convert(timePtrType))
+				} else {
+					targetField.Set(sourceField)
 				}
-				fld.Set(reflect.ValueOf(times))
+			case sliceXMLTimeType:
+				if targetFieldType == sliceTimeType {
+					newTimes := sourceField.Interface().([]*XMLTime)
+					times := make([]*time.Time, len(newTimes))
+					for i, nt := range newTimes {
+						if nt == nil {
+							continue
+						}
+						t := time.Time(*nt)
+						times[i] = &t
+					}
+					targetField.Set(reflect.ValueOf(times))
+				} else {
+					targetField.Set(sourceField)
+				}
 			default:
-				fld.Set(nFld)
+				targetField.Set(sourceField)
 			}
 		}
+	}
+}
+
+func isZero(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Func, reflect.Map, reflect.Slice, reflect.Struct:
+		return v.IsNil()
+	default:
+		zero := reflect.Zero(v.Type())
+		return v.Interface() == zero.Interface()
 	}
 }
 
@@ -254,14 +283,29 @@ func setDefaults(
 				if fld.Kind() == reflect.Ptr {
 					switch fld.Type() {
 					case durationPtrType:
-						if v, err := time.ParseDuration(tag); err == nil {
-							fld.Set(reflect.ValueOf(&v))
+						if d, err := time.ParseDuration(tag); err == nil {
+							fld.Set(reflect.ValueOf(&d))
+						}
+						continue
+					case xmlTimeDurationPtrType:
+						if d, err := time.ParseDuration(tag); err == nil {
+							x := XMLTimeDuration(d)
+							fld.Set(reflect.ValueOf(&x))
 						}
 						continue
 					case timePtrType:
 						for _, timeFormat := range timeFormats {
-							if v, err := time.Parse(timeFormat, tag); err == nil {
-								fld.Set(reflect.ValueOf(&v))
+							if t, err := time.Parse(timeFormat, tag); err == nil {
+								fld.Set(reflect.ValueOf(&t))
+								break
+							}
+						}
+						continue
+					case xmlTimePtrType:
+						for _, timeFormat := range timeFormats {
+							if t, err := time.Parse(timeFormat, tag); err == nil {
+								x := XMLTime(t)
+								fld.Set(reflect.ValueOf(&x))
 								break
 							}
 						}
