@@ -430,72 +430,12 @@ func transformValues(c reflect.Value, customFuncs []func(reflect.StructField, re
 
 		adjustCase(field, fld)
 		stripslash(field, fld)
+		addslash(field, fld)
 		stripprotocol(field, fld)
 
 		for _, customFunc := range customFuncs {
 			customFunc(field, fld)
 		}
-	}
-}
-
-func adjustCase(field reflect.StructField, fld reflect.Value) {
-	tag := field.Tag.Get("case")
-	if tag == "" {
-		return
-	}
-	var lower bool
-
-	if tag == "lower" {
-		lower = true
-	} else if tag == "upper" {
-		lower = false
-	} else {
-		return
-	}
-
-	f := reflect.Indirect(fld)
-	if f.Kind() == reflect.String {
-		var val string
-		if lower {
-			val = strings.ToLower(f.String())
-		} else {
-			val = strings.ToUpper(f.String())
-		}
-		c := reflect.ValueOf(val).Convert(f.Type())
-		f.Set(c)
-	}
-}
-
-func stripslash(field reflect.StructField, fld reflect.Value) {
-	if _, ok := field.Tag.Lookup("stripslash"); !ok {
-		return
-	}
-
-	f := reflect.Indirect(fld)
-	if f.Kind() == reflect.String {
-		val := strings.TrimSuffix(f.String(), "/")
-		c := reflect.ValueOf(val).Convert(f.Type())
-		f.Set(c)
-	}
-}
-
-func stripprotocol(field reflect.StructField, fld reflect.Value) {
-	if _, ok := field.Tag.Lookup("stripprotocol"); !ok {
-		return
-	}
-	f := reflect.Indirect(fld)
-	if f.Kind() == reflect.String {
-		val := f.String()
-		v := strings.TrimPrefix(val, "https://")
-		v = strings.TrimPrefix(v, "HTTPS://")
-		v = strings.TrimPrefix(v, "http://")
-		v = strings.TrimPrefix(v, "HTTP://")
-		v = strings.TrimPrefix(v, "tcp://")
-		v = strings.TrimPrefix(v, "TCP://")
-		v = strings.TrimPrefix(v, "udp://")
-		v = strings.TrimPrefix(v, "UDP://")
-		c := reflect.ValueOf(val).Convert(f.Type())
-		f.Set(c)
 	}
 }
 
