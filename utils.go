@@ -26,9 +26,9 @@ func recursiveStruct(c reflect.Value) bool {
 	return c.Kind() == reflect.Ptr &&
 		cType.Elem().Kind() == reflect.Struct &&
 		cType != timePtrType &&
-		cType != xmlTimePtrType &&
+		cType != parseableTimePtrType &&
 		cType != urlType &&
-		cType != xmlURLType
+		cType != parseableURLType
 }
 
 func makeFullConfig(
@@ -72,17 +72,19 @@ func makeFullConfig(
 		fieldType := field.Type
 		switch fld.Type() {
 		case durationPtrType:
-			fieldType = xmlTimeDurationPtrType
+			fieldType = parseableTimeDurationPtrType
 		case sliceDurationType:
-			fieldType = sliceXMLTimeDurationType
+			fieldType = sliceParseableTimeDurationType
 		case timePtrType:
-			fieldType = xmlTimePtrType
+			fieldType = parseableTimePtrType
 		case sliceTimeType:
-			fieldType = sliceXMLTimeType
+			fieldType = sliceParseableTimeType
 		case urlType:
-			fieldType = xmlURLType
+			fieldType = parseableURLType
 		case sliceURLType:
-			fieldType = sliceXMLURLType
+			fieldType = sliceParseableURLType
+		case mapDurationType:
+			fieldType = mapParseableDurationType
 		}
 
 		if structField {
@@ -199,15 +201,15 @@ func merge(oldV, newV reflect.Value) {
 		if !isZero(sourceField) && targetField.CanSet() {
 			targetFieldType := targetField.Type()
 			switch sourceField.Type() {
-			case xmlTimeDurationPtrType:
+			case parseableTimeDurationPtrType:
 				if targetFieldType == durationPtrType {
 					targetField.Set(sourceField.Convert(durationPtrType))
 				} else {
 					targetField.Set(sourceField)
 				}
-			case sliceXMLTimeDurationType:
+			case sliceParseableTimeDurationType:
 				if targetFieldType == sliceDurationType {
-					newDurations := sourceField.Interface().([]*XMLTimeDuration)
+					newDurations := sourceField.Interface().([]*ParseableTimeDuration)
 					durations := make([]*time.Duration, len(newDurations))
 					for i, nd := range newDurations {
 						if nd == nil {
@@ -220,15 +222,30 @@ func merge(oldV, newV reflect.Value) {
 				} else {
 					targetField.Set(sourceField)
 				}
-			case xmlTimePtrType:
+			case mapParseableDurationType:
+				if targetFieldType == mapDurationType {
+					newDurationMap := sourceField.Interface().(map[string]*ParseableTimeDuration)
+					durationMap := make(map[string]*time.Duration, len(newDurationMap))
+					for k, nd := range newDurationMap {
+						if nd == nil {
+							continue
+						}
+						d := time.Duration(*nd)
+						durationMap[k] = &d
+					}
+					targetField.Set(reflect.ValueOf(durationMap))
+				} else {
+					targetField.Set(sourceField)
+				}
+			case parseableTimePtrType:
 				if targetFieldType == timePtrType {
 					targetField.Set(sourceField.Convert(timePtrType))
 				} else {
 					targetField.Set(sourceField)
 				}
-			case sliceXMLTimeType:
+			case sliceParseableTimeType:
 				if targetFieldType == sliceTimeType {
-					newTimes := sourceField.Interface().([]*XMLTime)
+					newTimes := sourceField.Interface().([]*ParseableTime)
 					times := make([]*time.Time, len(newTimes))
 					for i, nt := range newTimes {
 						if nt == nil {
@@ -241,15 +258,15 @@ func merge(oldV, newV reflect.Value) {
 				} else {
 					targetField.Set(sourceField)
 				}
-			case xmlURLType:
+			case parseableURLType:
 				if targetFieldType == urlType {
 					targetField.Set(sourceField.Convert(urlType))
 				} else {
 					targetField.Set(sourceField)
 				}
-			case sliceXMLURLType:
+			case sliceParseableURLType:
 				if targetFieldType == sliceURLType {
-					newURLs := sourceField.Interface().([]*XMLURL)
+					newURLs := sourceField.Interface().([]*ParseableURL)
 					urls := make([]*url.URL, len(newURLs))
 					for i, nu := range newURLs {
 						if nu == nil {
@@ -301,7 +318,7 @@ func setDefaults(
 			setDefaults(fld, listSeparator, keyValueSeparator, emptySliceIndicator, emptyMapIndicator, timeFormats)
 			continue
 		}
-		if !fld.IsNil() && (fld.Type().Kind() != reflect.Map || fld.Len() > 0) {
+		if !isZero(fld) && (fld.Type().Kind() != reflect.Map || fld.Len() > 0) {
 			continue
 		}
 
@@ -321,9 +338,9 @@ func setDefaults(
 							fld.Set(reflect.ValueOf(&d))
 						}
 						continue
-					case xmlTimeDurationPtrType:
+					case parseableTimeDurationPtrType:
 						if d, err := time.ParseDuration(tag); err == nil {
-							x := XMLTimeDuration(d)
+							x := ParseableTimeDuration(d)
 							fld.Set(reflect.ValueOf(&x))
 						}
 						continue
@@ -335,10 +352,10 @@ func setDefaults(
 							}
 						}
 						continue
-					case xmlTimePtrType:
+					case parseableTimePtrType:
 						for _, timeFormat := range timeFormats {
 							if t, err := time.Parse(timeFormat, tag); err == nil {
-								x := XMLTime(t)
+								x := ParseableTime(t)
 								fld.Set(reflect.ValueOf(&x))
 								break
 							}
