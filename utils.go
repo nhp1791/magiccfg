@@ -631,8 +631,11 @@ func validateEnums(c reflect.Value) []error {
 				errs = append(errs, subErrs...)
 			}
 		}
-		name := cVal.Type().Field(i).Name
-		_ = name
+
+		if isZero(fld) {
+			continue
+		}
+
 		var t reflect.Type
 		if fld.Kind() == reflect.Ptr {
 			t = fld.Elem().Type()
@@ -640,8 +643,6 @@ func validateEnums(c reflect.Value) []error {
 			t = fld.Type()
 		}
 		if t.Kind() != reflect.String || t.Name() == "string" {
-			a := t.Kind()
-			_ = a
 			continue
 		}
 
