@@ -5,76 +5,112 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"strings"
 	"time"
 )
 
 var (
+	durationType             = reflect.TypeOf(time.Duration(0))
 	durationPtrType          = reflect.TypeOf(new(time.Duration))
-	sliceDurationType        = reflect.TypeOf([]*time.Duration{})
-	xmlTimeDurationPtrType   = reflect.TypeOf(new(XMLTimeDuration))
-	sliceXMLTimeDurationType = reflect.TypeOf([]*XMLTimeDuration{})
+	parseableDurationType    = reflect.TypeOf(ParseableDuration(0))
+	parseableDurationPtrType = reflect.TypeOf(new(ParseableDuration))
 	timePtrType              = reflect.TypeOf(new(time.Time))
-	xmlTimePtrType           = reflect.TypeOf(new(XMLTime))
-	sliceTimeType            = reflect.TypeOf([]*time.Time{})
-	sliceXMLTimeType         = reflect.TypeOf([]*XMLTime{})
+	parseableTimePtrType     = reflect.TypeOf(new(ParseableTime))
 	urlType                  = reflect.TypeOf(new(url.URL))
-	xmlURLType               = reflect.TypeOf(new(XMLURL))
-	sliceURLType             = reflect.TypeOf([]*url.URL{})
-	sliceXMLURLType          = reflect.TypeOf([]*XMLURL{})
+	parseableURLType         = reflect.TypeOf(new(ParseableURL))
 	packageTimeFormats       []string
 )
 
-// XMLTimeDuration enables time.Duration to be parsed by the encoding/xml package
-type XMLTimeDuration time.Duration
+// ParseableDuration enables time.Duration to be parsed by the encoding/xml package
+type ParseableDuration time.Duration
 
-func (x *XMLTimeDuration) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+func (p *ParseableDuration) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	var s string
 	if err := d.DecodeElement(&s, &start); err != nil {
 		return err
 	}
-	dur, err := time.ParseDuration(s)
+	dur, err := time.ParseDuration(strings.TrimSpace(s))
 	if err != nil {
 		return err
 	}
-	*x = XMLTimeDuration(dur)
+	*p = ParseableDuration(dur)
 	return nil
 }
 
-func (x *XMLTimeDuration) UnmarshalFlag(value string) error {
-	dur, err := time.ParseDuration(value)
+func (p *ParseableDuration) UnmarshalFlag(value string) error {
+	dur, err := time.ParseDuration(strings.TrimSpace(value))
 	if err != nil {
 		return err
 	}
-	*x = XMLTimeDuration(dur)
+	*p = ParseableDuration(dur)
 	return nil
+}
+
+func (p *ParseableDuration) UnmarshalTOML(value any) error {
+	v, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("%s is not a string", value)
+	}
+	dur, err := time.ParseDuration(strings.TrimSpace(v))
+	if err != nil {
+		return err
+	}
+	*p = ParseableDuration(dur)
+	return nil
+}
+
+func (p *ParseableDuration) UnmarshalYAML(value []byte) error {
+	dur, err := time.ParseDuration(strings.TrimSpace(strings.ReplaceAll(string(value), "\"", "")))
+	if err != nil {
+		return err
+	}
+	*p = ParseableDuration(dur)
+	return nil
+}
+
+func UnmarshalDurationEnv(v string) (any, error) {
+	dur, err := time.ParseDuration(v)
+	if err != nil {
+		return "", err
+	}
+	return ParseableDuration(dur), nil
+}
+
+func UnmarshalDurationPtrEnv(v string) (any, error) {
+	dur, err := time.ParseDuration(v)
+	if err != nil {
+		return "", err
+	}
+	pd := ParseableDuration(dur)
+	return &pd, nil
 }
 
 // XMLTime enables time.Time to be parsed by the encoding/xml package
-type XMLTime time.Time
+type ParseableTime time.Time
 
-func (x *XMLTime) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+func (p *ParseableTime) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	var s string
 	if err := d.DecodeElement(&s, &start); err != nil {
 		return err
 	}
 	if packageTimeFormats != nil {
 		for _, v := range packageTimeFormats {
-			t, err := time.Parse(v, s)
+			t, err := time.Parse(v, strings.TrimSpace(s))
 			if err == nil {
-				*x = XMLTime(t)
+				*p = ParseableTime(t)
 				return nil
 			}
 		}
 	}
-	return fmt.Errorf("Could not parse XML time: %s", s)
+	return fmt.Errorf("Could not parse time: %s", s)
 }
 
-func (x *XMLTime) UnmarshalFlag(s string) error {
+func (p *ParseableTime) UnmarshalFlag(s string) error {
 	if packageTimeFormats != nil {
 		for _, v := range packageTimeFormats {
 			t, err := time.Parse(v, s)
 			if err == nil {
-				*x = XMLTime(t)
+				*p = ParseableTime(t)
 				return nil
 			}
 		}
@@ -83,35 +119,35 @@ func (x *XMLTime) UnmarshalFlag(s string) error {
 
 }
 
-type XMLURL url.URL
+type ParseableURL url.URL
 
-func (x *XMLURL) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+func (p *ParseableURL) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	var s string
 	if err := d.DecodeElement(&s, &start); err != nil {
 		return err
 	}
-	u, err := url.Parse(s)
+	u, err := url.Parse(strings.TrimSpace(s))
 	if err != nil {
 		return err
 	}
-	*x = XMLURL(*u)
+	*p = ParseableURL(*u)
 	return nil
 }
 
-func (x *XMLURL) UnmarshalText(val []byte) error {
-	u, err := url.Parse(string(val))
+func (p *ParseableURL) UnmarshalText(val []byte) error {
+	u, err := url.Parse(strings.TrimSpace(string(val)))
 	if err != nil {
 		return err
 	}
-	*x = XMLURL(*u)
+	*p = ParseableURL(*u)
 	return nil
 }
 
-func (x *XMLURL) UnmarshalFlag(s string) error {
-	u, err := url.Parse(s)
+func (p *ParseableURL) UnmarshalFlag(s string) error {
+	u, err := url.Parse(strings.TrimSpace(s))
 	if err != nil {
 		return err
 	}
-	*x = XMLURL(*u)
+	*p = ParseableURL(*u)
 	return nil
 }
