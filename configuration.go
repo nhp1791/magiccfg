@@ -121,7 +121,7 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 
 	fc, usages := makeFullConfig(configVal, prefix, nil, nil)
 	if options != nil {
-		usages["env"][options.ConfigFileEnvName]++
+		usages[_envTag][options.ConfigFileEnvName]++
 		usages["long"][options.ConfigFileLong]++
 		usages["short"][options.ConfigFileShort]++
 	}
@@ -167,7 +167,7 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 		remainingArgs:        remainingArgs,
 		configFiles:          configFiles,
 		configFileVars: map[string]string{
-			"env":   options.ConfigFileEnvName,
+			_envTag: options.ConfigFileEnvName,
 			"short": options.ConfigFileShort,
 			"long":  options.ConfigFileLong,
 		},
@@ -176,9 +176,21 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 
 func (c *magicConfig[T]) ParseEnv() *magicConfig[T] {
 	newConfig := c.empty().Interface()
-	if err := env.Parse(newConfig); err != nil {
+	if err := env.ParseWithOptions(
+		newConfig,
+		env.Options{
+			TagName: _envTag,
+			FuncMap: map[reflect.Type]env.ParserFunc{
+				parseableDurationType:      UnmarshalDurationEnv,
+				parseableDurationPtrType:   UnmarshalDurationPtrEnv,
+				sliceParseableDurationType: UnmarshalDurationSliceEnv(c.listSeparator),
+				mapParseableDurationType:   UnmarshalDurationMapEnvWrapper(c.listSeparator, c.keyValueSeparator),
+			},
+		},
+	); err != nil {
 		c.constructionErrors = append(c.constructionErrors, err)
 	}
+	spew.Dump(newConfig)
 	merge(reflect.ValueOf(c.newConfig), reflect.ValueOf(newConfig))
 	return c
 }
@@ -217,7 +229,6 @@ func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
 			if err := toml.Unmarshal(data, nc); err != nil {
 				c.constructionErrors = append(c.constructionErrors, err)
 			}
-			spew.Dump(nc)
 
 		}
 		merge(reflect.ValueOf(newConfig), reflect.ValueOf(nc))
@@ -227,19 +238,21 @@ func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
 }
 
 func (c *magicConfig[T]) ParseFlags() *magicConfig[T] {
+	newConfig := c.empty().Interface()
 	var parser *flags.Parser
 	if c.ignoreUnknownOptions {
-		parser = flags.NewParser(c.newConfig, flags.Default|flags.IgnoreUnknown)
+		parser = flags.NewParser(newConfig, flags.Default|flags.IgnoreUnknown)
 	} else {
-		parser = flags.NewParser(c.newConfig, flags.Default)
+		parser = flags.NewParser(newConfig, flags.Default)
 	}
-	args := splitArgs(reflect.ValueOf(c.newConfig), c.remainingArgs, c.listSeparator)
+	args := splitArgs(reflect.ValueOf(newConfig), c.remainingArgs, c.listSeparator)
 	if _, err := parser.ParseArgs(args); err != nil {
 		if e, ok := err.(*flags.Error); ok && e.Type == flags.ErrHelp {
 			e.Message = "Help Menu Displayed"
 		}
 		c.constructionErrors = append(c.constructionErrors, err)
 	}
+	merge(reflect.ValueOf(c.newConfig), reflect.ValueOf(newConfig))
 
 	return c
 }

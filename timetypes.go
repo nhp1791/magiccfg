@@ -5,50 +5,132 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"strings"
 	"time"
 )
 
 var (
-	durationPtrType                = reflect.TypeOf(new(time.Duration))
-	sliceDurationType              = reflect.TypeOf([]*time.Duration{})
-	parseableTimeDurationPtrType   = reflect.TypeOf(new(ParseableTimeDuration))
-	sliceParseableTimeDurationType = reflect.TypeOf([]*ParseableTimeDuration{})
-	timePtrType                    = reflect.TypeOf(new(time.Time))
-	parseableTimePtrType           = reflect.TypeOf(new(ParseableTime))
-	sliceTimeType                  = reflect.TypeOf([]*time.Time{})
-	sliceParseableTimeType         = reflect.TypeOf([]*ParseableTime{})
-	urlType                        = reflect.TypeOf(new(url.URL))
-	parseableURLType               = reflect.TypeOf(new(ParseableURL))
-	sliceURLType                   = reflect.TypeOf([]*url.URL{})
-	sliceParseableURLType          = reflect.TypeOf([]*ParseableURL{})
-	mapDurationType                = reflect.TypeOf(map[string]*time.Duration{})
-	mapParseableDurationType       = reflect.TypeOf(map[string]*ParseableTimeDuration{})
-	packageTimeFormats             []string
+	durationType                  = reflect.TypeOf(time.Duration(0))
+	durationPtrType               = reflect.TypeOf(new(time.Duration))
+	sliceDurationType             = reflect.TypeOf([]time.Duration{})
+	sliceDurationPtrType          = reflect.TypeOf([]*time.Duration{})
+	mapDurationType               = reflect.TypeOf(map[string]time.Duration{})
+	mapDurationPtrType            = reflect.TypeOf(map[string]*time.Duration{})
+	parseableDurationType         = reflect.TypeOf(ParseableDuration(0))
+	parseableDurationPtrType      = reflect.TypeOf(new(ParseableDuration))
+	sliceParseableDurationType    = reflect.TypeOf([]ParseableDuration{})
+	sliceParseableDurationPtrType = reflect.TypeOf([]*ParseableDuration{})
+	mapParseableDurationType      = reflect.TypeOf(map[string]ParseableDuration{})
+	mapParseableDurationPtrType   = reflect.TypeOf(map[string]*ParseableDuration{})
+	timePtrType                   = reflect.TypeOf(new(time.Time))
+	parseableTimePtrType          = reflect.TypeOf(new(ParseableTime))
+	sliceTimeType                 = reflect.TypeOf([]*time.Time{})
+	sliceParseableTimeType        = reflect.TypeOf([]*ParseableTime{})
+	urlType                       = reflect.TypeOf(new(url.URL))
+	parseableURLType              = reflect.TypeOf(new(ParseableURL))
+	sliceURLType                  = reflect.TypeOf([]*url.URL{})
+	sliceParseableURLType         = reflect.TypeOf([]*ParseableURL{})
+	packageTimeFormats            []string
 )
 
-// ParseableTimeDuration enables time.Duration to be parsed by the encoding/xml package
-type ParseableTimeDuration time.Duration
+// ParseableDuration enables time.Duration to be parsed by the encoding/xml package
+type ParseableDuration time.Duration
 
-func (p *ParseableTimeDuration) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+func (p *ParseableDuration) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
 	var s string
 	if err := d.DecodeElement(&s, &start); err != nil {
 		return err
 	}
-	dur, err := time.ParseDuration(s)
+	dur, err := time.ParseDuration(strings.TrimSpace(s))
 	if err != nil {
 		return err
 	}
-	*p = ParseableTimeDuration(dur)
+	*p = ParseableDuration(dur)
 	return nil
 }
 
-func (p *ParseableTimeDuration) UnmarshalFlag(value string) error {
-	dur, err := time.ParseDuration(value)
+func (p *ParseableDuration) UnmarshalFlag(value string) error {
+	dur, err := time.ParseDuration(strings.TrimSpace(value))
 	if err != nil {
 		return err
 	}
-	*p = ParseableTimeDuration(dur)
+	*p = ParseableDuration(dur)
 	return nil
+}
+
+func (p *ParseableDuration) UnmarshalTOML(value any) error {
+	v, ok := value.(string)
+	if !ok {
+		return fmt.Errorf("%s is not a string", value)
+	}
+	dur, err := time.ParseDuration(strings.TrimSpace(v))
+	if err != nil {
+		return err
+	}
+	*p = ParseableDuration(dur)
+	return nil
+}
+
+func (p *ParseableDuration) UnmarshalYAML(value []byte) error {
+	dur, err := time.ParseDuration(strings.TrimSpace(strings.ReplaceAll(string(value), "\"", "")))
+	if err != nil {
+		return err
+	}
+	*p = ParseableDuration(dur)
+	return nil
+}
+
+func UnmarshalDurationEnv(v string) (any, error) {
+	dur, err := time.ParseDuration(v)
+	if err != nil {
+		return "", err
+	}
+	return ParseableDuration(dur), nil
+}
+
+func UnmarshalDurationPtrEnv(v string) (any, error) {
+	dur, err := time.ParseDuration(v)
+	if err != nil {
+		return "", err
+	}
+	pd := ParseableDuration(dur)
+	return &pd, nil
+}
+
+func UnmarshalDurationMapEnvWrapper(listSeparator, keyValueSeparator string) func(string) (any, error) {
+	return func(v string) (any, error) {
+		values := make(map[string]ParseableDuration)
+		kvs := strings.Split(v, listSeparator)
+		for _, kv := range kvs {
+			vals := strings.Split(kv, keyValueSeparator)
+			if len(vals) != 2 {
+				continue
+			}
+			dur, err := time.ParseDuration(vals[1])
+			if err != nil {
+				continue
+			}
+			pd := ParseableDuration(dur)
+			values[vals[0]] = pd
+		}
+		return values, nil
+	}
+}
+
+func UnmarshalDurationSliceEnv(listSeparator string) func(string) (any, error) {
+	return func(v string) (any, error) {
+		values := []ParseableDuration{}
+		vals := strings.Split(v, listSeparator)
+		for _, val := range vals {
+			dur, err := time.ParseDuration(val)
+			if err != nil {
+				continue
+			}
+			pd := ParseableDuration(dur)
+			values = append(values, pd)
+		}
+		return values, nil
+	}
 }
 
 // ParseableTime enables time.Time to be parsed by the encoding/xml package

@@ -12,8 +12,11 @@ import (
 // while "uppercase", "upper", and "u" all work to produce upper-case values.  These
 // values are case-insensitive.
 func adjustCase(field reflect.StructField, fld reflect.Value) {
+	f := fld
+	if fld.Kind() == reflect.Ptr {
+		f = reflect.Indirect(fld)
+	}
 	// This only works on string values
-	f := reflect.Indirect(fld)
 	if f.Kind() != reflect.String {
 		return
 	}
@@ -55,7 +58,10 @@ func adjustCase(field reflect.StructField, fld reflect.Value) {
 // uses the configuration variable can be assured of the form and need not
 // do its own check.
 func stripslash(field reflect.StructField, fld reflect.Value) {
-	f := reflect.Indirect(fld)
+	f := fld
+	if fld.Kind() == reflect.Ptr {
+		f = reflect.Indirect(fld)
+	}
 
 	if _, ok := field.Tag.Lookup("stripslash"); !ok || f.Kind() != reflect.String {
 		return
@@ -72,7 +78,10 @@ func stripslash(field reflect.StructField, fld reflect.Value) {
 // uses the configuration variable can be assured of the form and need not
 // do its own check.
 func addslash(field reflect.StructField, fld reflect.Value) {
-	f := reflect.Indirect(fld)
+	f := fld
+	if fld.Kind() == reflect.Ptr {
+		f = reflect.Indirect(fld)
+	}
 
 	if _, ok := field.Tag.Lookup("addslash"); !ok || f.Kind() != reflect.String {
 		return
@@ -91,7 +100,10 @@ func addslash(field reflect.StructField, fld reflect.Value) {
 // server names/addresses so that code using the configuration variable can be assured
 // of its form and need not make its own checks.
 func stripscheme(field reflect.StructField, fld reflect.Value) {
-	f := reflect.Indirect(fld)
+	f := fld
+	if fld.Kind() == reflect.Ptr {
+		f = reflect.Indirect(fld)
+	}
 
 	if _, ok := field.Tag.Lookup("stripscheme"); !ok || f.Kind() != reflect.String {
 		return

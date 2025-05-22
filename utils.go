@@ -11,6 +11,7 @@ import (
 )
 
 const (
+	_envTag     = "envTag"
 	_emptyslice = "emptyslice"
 	_emptymap   = "emptymap"
 )
@@ -38,7 +39,7 @@ func makeFullConfig(
 	envParentName *string,
 ) (reflect.Value, map[string]map[string]int) {
 	usages := map[string]map[string]int{
-		"env":   map[string]int{},
+		_envTag: map[string]int{},
 		"long":  map[string]int{},
 		"short": map[string]int{},
 	}
@@ -71,10 +72,18 @@ func makeFullConfig(
 
 		fieldType := field.Type
 		switch fld.Type() {
+		case durationType:
+			fieldType = parseableDurationType
 		case durationPtrType:
-			fieldType = parseableTimeDurationPtrType
+			fieldType = parseableDurationPtrType
 		case sliceDurationType:
-			fieldType = sliceParseableTimeDurationType
+			fieldType = sliceParseableDurationType
+		case sliceDurationPtrType:
+			fieldType = sliceParseableDurationPtrType
+		case mapDurationType:
+			fieldType = mapParseableDurationType
+		case mapDurationPtrType:
+			fieldType = mapParseableDurationPtrType
 		case timePtrType:
 			fieldType = parseableTimePtrType
 		case sliceTimeType:
@@ -83,8 +92,7 @@ func makeFullConfig(
 			fieldType = parseableURLType
 		case sliceURLType:
 			fieldType = sliceParseableURLType
-		case mapDurationType:
-			fieldType = mapParseableDurationType
+
 		}
 
 		if structField {
@@ -96,7 +104,7 @@ func makeFullConfig(
 				}
 			}
 		} else {
-			usages["env"][tag.Get("env")]++
+			usages[_envTag][tag.Get(_envTag)]++
 			usages["short"][tag.Get("short")]++
 			usages["long"][tag.Get("long")]++
 		}
@@ -128,8 +136,8 @@ func buildTag(
 	var sb strings.Builder
 
 	sb.WriteString(string(tag))
-	if !structField && tag.Get("env") == "" {
-		sb.WriteString(fmt.Sprintf(` env:"%s"`, convertNameToEnv(name, envParentName, prefix)))
+	if !structField && tag.Get(_envTag) == "" {
+		sb.WriteString(fmt.Sprintf(` %s:"%s"`, _envTag, convertNameToEnv(name, envParentName, prefix)))
 	}
 	if tag.Get("yaml") == "" {
 		sb.WriteString(fmt.Sprintf(` yaml:"%s"`, convertNameToYAML(name)))
@@ -188,6 +196,7 @@ func populateEmptyStructs(c reflect.Value) {
 func merge(oldV, newV reflect.Value) {
 	target := reflect.Indirect(oldV)
 	source := reflect.Indirect(newV)
+
 	for i := range target.NumField() {
 		targetField := target.Field(i)
 		sourceField := source.Field(i)
@@ -201,15 +210,23 @@ func merge(oldV, newV reflect.Value) {
 		if !isZero(sourceField) && targetField.CanSet() {
 			targetFieldType := targetField.Type()
 			switch sourceField.Type() {
-			case parseableTimeDurationPtrType:
-				if targetFieldType == durationPtrType {
-					targetField.Set(sourceField.Convert(durationPtrType))
+			case parseableDurationType, parseableDurationPtrType:
+				targetField.Set(sourceField.Convert(targetFieldType))
+			case sliceParseableDurationType:
+				if targetFieldType == sliceDurationType {
+					newDurations := sourceField.Interface().([]ParseableDuration)
+					durations := make([]time.Duration, len(newDurations))
+					for i, nd := range newDurations {
+						d := time.Duration(nd)
+						durations[i] = d
+					}
+					targetField.Set(reflect.ValueOf(durations))
 				} else {
 					targetField.Set(sourceField)
 				}
-			case sliceParseableTimeDurationType:
-				if targetFieldType == sliceDurationType {
-					newDurations := sourceField.Interface().([]*ParseableTimeDuration)
+			case sliceParseableDurationPtrType:
+				if targetFieldType == sliceDurationPtrType {
+					newDurations := sourceField.Interface().([]*ParseableDuration)
 					durations := make([]*time.Duration, len(newDurations))
 					for i, nd := range newDurations {
 						if nd == nil {
@@ -224,7 +241,19 @@ func merge(oldV, newV reflect.Value) {
 				}
 			case mapParseableDurationType:
 				if targetFieldType == mapDurationType {
-					newDurationMap := sourceField.Interface().(map[string]*ParseableTimeDuration)
+					newDurationMap := sourceField.Interface().(map[string]ParseableDuration)
+					durationMap := make(map[string]time.Duration, len(newDurationMap))
+					for k, nd := range newDurationMap {
+						d := time.Duration(nd)
+						durationMap[k] = d
+					}
+					targetField.Set(reflect.ValueOf(durationMap))
+				} else {
+					targetField.Set(sourceField)
+				}
+			case mapParseableDurationPtrType:
+				if targetFieldType == mapDurationPtrType {
+					newDurationMap := sourceField.Interface().(map[string]*ParseableDuration)
 					durationMap := make(map[string]*time.Duration, len(newDurationMap))
 					for k, nd := range newDurationMap {
 						if nd == nil {
@@ -288,8 +317,10 @@ func merge(oldV, newV reflect.Value) {
 
 func isZero(v reflect.Value) bool {
 	switch v.Kind() {
-	case reflect.Func, reflect.Map, reflect.Slice, reflect.Struct:
+	case reflect.Func, reflect.Struct, reflect.Ptr:
 		return v.IsNil()
+	case reflect.Map, reflect.Slice:
+		return v.IsNil() || v.Len() == 0
 	default:
 		zero := reflect.Zero(v.Type())
 		return v.Interface() == zero.Interface()
@@ -322,64 +353,74 @@ func setDefaults(
 			continue
 		}
 
-		f := reflect.Indirect(fld)
-
 		tag := field.Tag.Get("def")
 		if tag != "" {
 			if fld.Type().Kind() == reflect.Map {
 				fld.Set(reflect.MakeMap(fld.Type()))
 			} else if fld.Type().Kind() == reflect.Slice {
-				fld.Set(reflect.MakeSlice(f.Type(), 0, 0))
+				fld.Set(reflect.MakeSlice(fld.Type(), 0, 0))
 			} else {
-				if fld.Kind() == reflect.Ptr {
-					switch fld.Type() {
-					case durationPtrType:
-						if d, err := time.ParseDuration(tag); err == nil {
-							fld.Set(reflect.ValueOf(&d))
-						}
-						continue
-					case parseableTimeDurationPtrType:
-						if d, err := time.ParseDuration(tag); err == nil {
-							x := ParseableTimeDuration(d)
-							fld.Set(reflect.ValueOf(&x))
-						}
-						continue
-					case timePtrType:
-						for _, timeFormat := range timeFormats {
-							if t, err := time.Parse(timeFormat, tag); err == nil {
-								fld.Set(reflect.ValueOf(&t))
-								break
-							}
-						}
-						continue
-					case parseableTimePtrType:
-						for _, timeFormat := range timeFormats {
-							if t, err := time.Parse(timeFormat, tag); err == nil {
-								x := ParseableTime(t)
-								fld.Set(reflect.ValueOf(&x))
-								break
-							}
-						}
-						continue
-					case urlType:
-						if u, err := url.Parse(tag); err == nil {
-							fld.Set(reflect.ValueOf(u))
-						}
-						continue
+				switch fld.Type() {
+				case durationType:
+					if d, err := time.ParseDuration(tag); err == nil {
+						fld.Set(reflect.ValueOf(d))
 					}
+					continue
+				case durationPtrType:
+					if d, err := time.ParseDuration(tag); err == nil {
+						fld.Set(reflect.ValueOf(&d))
+					}
+					continue
+				case parseableDurationType:
+					if d, err := time.ParseDuration(tag); err == nil {
+						x := ParseableDuration(d)
+						fld.Set(reflect.ValueOf(x))
+					}
+					continue
+				case parseableDurationPtrType:
+					if d, err := time.ParseDuration(tag); err == nil {
+						x := ParseableDuration(d)
+						fld.Set(reflect.ValueOf(&x))
+					}
+					continue
+				case timePtrType:
+					for _, timeFormat := range timeFormats {
+						if t, err := time.Parse(timeFormat, tag); err == nil {
+							fld.Set(reflect.ValueOf(&t))
+							break
+						}
+					}
+					continue
+				case parseableTimePtrType:
+					for _, timeFormat := range timeFormats {
+						if t, err := time.Parse(timeFormat, tag); err == nil {
+							x := ParseableTime(t)
+							fld.Set(reflect.ValueOf(&x))
+							break
+						}
+					}
+					continue
+				case urlType:
+					if u, err := url.Parse(tag); err == nil {
+						fld.Set(reflect.ValueOf(u))
+					}
+					continue
 				}
-				fld.Set(reflect.New(field.Type.Elem()))
+
+				if fld.Kind() == reflect.Ptr {
+					fld.Set(reflect.New(field.Type.Elem()))
+				} else {
+					fld.Set(reflect.New(field.Type).Elem())
+				}
 			}
 
-			f := reflect.Indirect(fld)
-
-			setFieldValue(f, tag, listSeparator, keyValueSeparator, emptySliceIndicator, emptyMapIndicator, timeFormats)
+			setFieldValue(fld, tag, listSeparator, keyValueSeparator, emptySliceIndicator, emptyMapIndicator, timeFormats)
 		}
 	}
 }
 
 func setFieldValue(
-	f reflect.Value,
+	fld reflect.Value,
 	val string,
 	listSeparator string,
 	keyValueSeparator string,
@@ -387,6 +428,10 @@ func setFieldValue(
 	emptyMapIndicator string,
 	timeFormats []string,
 ) {
+	f := fld
+	if fld.Kind() == reflect.Ptr {
+		f = reflect.Indirect(fld)
+	}
 	switch f.Type().Kind() {
 	case reflect.String:
 		c := reflect.ValueOf(val).Convert(f.Type())
@@ -404,6 +449,13 @@ func setFieldValue(
 			return
 		}
 		c := reflect.ValueOf(float64(v)).Convert(f.Type())
+		f.Set(c)
+	case reflect.Complex128, reflect.Complex64:
+		v, err := strconv.ParseComplex(val, 128)
+		if err != nil {
+			return
+		}
+		c := reflect.ValueOf(complex128(v)).Convert(f.Type())
 		f.Set(c)
 	case reflect.Bool:
 		b, err := strconv.ParseBool(val)
@@ -427,12 +479,27 @@ func setFieldValue(
 		}
 		c := reflect.MakeMap(f.Type())
 		elemType := reflect.TypeOf(f.Interface()).Elem()
+		pointer := false
 		elemKind := elemType.Kind()
+		if elemKind == reflect.Ptr {
+			pointer = true
+			elemKind = elemType.Elem().Kind()
+		}
 		switch elemType {
-		case durationPtrType:
+		case parseableDurationType:
 			for k, v := range vals {
 				if d, err := time.ParseDuration(v); err == nil {
-					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(&d))
+					pd := ParseableDuration(d)
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(pd))
+				}
+			}
+			f.Set(c)
+			return
+		case parseableDurationPtrType:
+			for k, v := range vals {
+				if d, err := time.ParseDuration(v); err == nil {
+					pd := ParseableDuration(d)
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(&pd))
 				}
 			}
 			f.Set(c)
@@ -460,25 +527,53 @@ func setFieldValue(
 		for k, v := range vals {
 			switch elemKind {
 			case reflect.String:
-				c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(v).Convert(f.Type().Elem()))
+				if pointer {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(&v).Convert(f.Type().Elem()))
+				} else {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(v).Convert(f.Type().Elem()))
+				}
 			case reflect.Bool:
 				b, err := strconv.ParseBool(v)
 				if err != nil {
 					continue
 				}
-				c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(b).Convert(elemType))
+				if pointer {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(&b).Convert(elemType))
+				} else {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(b).Convert(elemType))
+				}
 			case reflect.Int, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int8, reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint8:
 				i, err := strconv.ParseInt(v, 10, 0)
 				if err != nil {
 					continue
 				}
-				c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(i).Convert(elemType))
+				if pointer {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(&i).Convert(elemType))
+				} else {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(i).Convert(elemType))
+				}
+			case reflect.Complex128, reflect.Complex64:
+				i, err := strconv.ParseComplex(val, 128)
+				if err != nil {
+					return
+				}
+				if pointer {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(&i).Convert(elemType))
+
+				} else {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(i).Convert(elemType))
+				}
 			case reflect.Float32, reflect.Float64:
 				v, err := strconv.ParseFloat(val, 64)
 				if err != nil {
 					return
 				}
-				c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(v).Convert(elemType))
+				if pointer {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(&v).Convert(elemType))
+
+				} else {
+					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(v).Convert(elemType))
+				}
 			}
 		}
 		f.Set(c)
@@ -489,12 +584,27 @@ func setFieldValue(
 		}
 		c := reflect.MakeSlice(f.Type(), 0, len(vals))
 		elemType := reflect.TypeOf(f.Interface()).Elem()
+		pointer := false
 		elemKind := elemType.Kind()
+		if elemKind == reflect.Ptr {
+			pointer = true
+			elemKind = elemType.Elem().Kind()
+		}
 		switch elemType {
-		case durationPtrType:
+		case parseableDurationType:
 			for _, dur := range vals {
 				if d, err := time.ParseDuration(dur); err == nil {
-					c = reflect.Append(c, reflect.ValueOf(&d))
+					pd := ParseableDuration(d)
+					c = reflect.Append(c, reflect.ValueOf(pd))
+				}
+			}
+			f.Set(c)
+			return
+		case parseableDurationPtrType:
+			for _, dur := range vals {
+				if d, err := time.ParseDuration(dur); err == nil {
+					pd := ParseableDuration(d)
+					c = reflect.Append(c, reflect.ValueOf(&pd))
 				}
 			}
 			f.Set(c)
@@ -523,25 +633,51 @@ func setFieldValue(
 		for _, v := range vals {
 			switch elemKind {
 			case reflect.String:
-				c = reflect.Append(c, reflect.ValueOf(v).Convert(f.Type().Elem()))
+				if pointer {
+					c = reflect.Append(c, reflect.ValueOf(&v).Convert(f.Type().Elem()))
+				} else {
+					c = reflect.Append(c, reflect.ValueOf(v).Convert(f.Type().Elem()))
+				}
 			case reflect.Bool:
 				b, err := strconv.ParseBool(v)
 				if err != nil {
 					continue
 				}
-				c = reflect.Append(c, reflect.ValueOf(b).Convert(elemType))
+				if pointer {
+					c = reflect.Append(c, reflect.ValueOf(&b).Convert(elemType))
+				} else {
+					c = reflect.Append(c, reflect.ValueOf(b).Convert(elemType))
+				}
 			case reflect.Int, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int8, reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint8:
 				i, err := strconv.ParseInt(v, 10, 0)
 				if err != nil {
 					continue
 				}
-				c = reflect.Append(c, reflect.ValueOf(i).Convert(elemType))
+				if pointer {
+					c = reflect.Append(c, reflect.ValueOf(&i).Convert(elemType))
+				} else {
+					c = reflect.Append(c, reflect.ValueOf(i).Convert(elemType))
+				}
 			case reflect.Float32, reflect.Float64:
 				v, err := strconv.ParseFloat(val, 64)
 				if err != nil {
 					return
 				}
-				c = reflect.Append(c, reflect.ValueOf(v).Convert(elemType))
+				if pointer {
+					c = reflect.Append(c, reflect.ValueOf(&v).Convert(elemType))
+				} else {
+					c = reflect.Append(c, reflect.ValueOf(v).Convert(elemType))
+				}
+			case reflect.Complex128, reflect.Complex64:
+				i, err := strconv.ParseComplex(val, 128)
+				if err != nil {
+					return
+				}
+				if pointer {
+					c = reflect.Append(c, reflect.ValueOf(&i).Convert(elemType))
+				} else {
+					c = reflect.Append(c, reflect.ValueOf(i).Convert(elemType))
+				}
 			}
 		}
 		f.Set(c)
@@ -576,7 +712,10 @@ func validateEnums(c reflect.Value) []error {
 	if !recursiveStruct(c) {
 		return errs
 	}
-	cVal := reflect.Indirect(c)
+	cVal := c
+	if cVal.Kind() == reflect.Ptr {
+		cVal = reflect.Indirect(c)
+	}
 	for i := range cVal.NumField() {
 		fld := cVal.Field(i)
 		if recursiveStruct(fld) {
@@ -584,8 +723,14 @@ func validateEnums(c reflect.Value) []error {
 				errs = append(errs, subErrs...)
 			}
 		}
-
-		t := fld.Type().Elem()
+		name := cVal.Type().Field(i).Name
+		_ = name
+		var t reflect.Type
+		if fld.Kind() == reflect.Ptr {
+			t = reflect.TypeOf(fld.Elem())
+		} else {
+			t = fld.Type()
+		}
 		if t.Kind() != reflect.String || t.Name() == "string" {
 			continue
 		}
@@ -705,7 +850,7 @@ func getValues(c reflect.Value, arg string, args []string, i int, listSeparator 
 func extractValues(c reflect.Value, arg string, valArg string, listSeparator string) []string {
 	values := []string{}
 
-	if !strings.Contains(valArg, listSeparator) || !verifySliceType(c, arg) {
+	if !strings.Contains(valArg, listSeparator) || !verifySliceOrMapType(c, arg) {
 		values = append(values, valArg)
 		return values
 	}
@@ -713,7 +858,7 @@ func extractValues(c reflect.Value, arg string, valArg string, listSeparator str
 	return strings.Split(valArg, listSeparator)
 }
 
-func verifySliceType(c reflect.Value, arg string) bool {
+func verifySliceOrMapType(c reflect.Value, arg string) bool {
 	if !recursiveStruct(c) {
 		return false
 	}
@@ -725,7 +870,7 @@ func verifySliceType(c reflect.Value, arg string) bool {
 		field := cVal.Type().Field(i)
 		fld := cVal.Field(i)
 		if recursiveStruct(fld) {
-			if verifySliceType(fld, arg) {
+			if verifySliceOrMapType(fld, arg) {
 				return true
 			}
 			continue
@@ -738,7 +883,7 @@ func verifySliceType(c reflect.Value, arg string) bool {
 			continue
 		}
 
-		if fld.Type().Kind() == reflect.Slice {
+		if fld.Type().Kind() == reflect.Slice || fld.Type().Kind() == reflect.Map {
 			return true
 		}
 
