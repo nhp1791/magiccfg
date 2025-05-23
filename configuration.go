@@ -24,6 +24,7 @@ type magicConfig[T any] struct {
 	ignoreUnknownOptions bool
 	originalConfig       *T
 	newConfig            any
+	validateConfig       any
 	validator            *validator.Validate
 	transformFuncs       []func(reflect.StructField, reflect.Value)
 	timeFormats          []string
@@ -124,6 +125,8 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 		usages["long"][options.ConfigFileLong]++
 		usages["short"][options.ConfigFileShort]++
 	}
+
+	vc := makeValidateConfig(configVal)
 	conflict := false
 	var sb strings.Builder
 	sb.WriteString("Cannot construct configurationation due to the following conflicts:")
@@ -153,6 +156,7 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 	return &magicConfig[T]{
 		originalConfig:       config,
 		newConfig:            fullConfig,
+		validateConfig:       vc.Interface(),
 		envPrefix:            prefix,
 		listSeparator:        listSeparator,
 		keyValueSeparator:    keyValueSeparator,
@@ -256,10 +260,12 @@ func (c *magicConfig[T]) Validate() *magicConfig[T] {
 	if errs := validateEnums(reflect.ValueOf(c.newConfig)); len(errs) > 0 {
 		c.constructionErrors = append(c.constructionErrors, errs...)
 	}
-	if err := c.validator.Struct(c.newConfig); err != nil {
+	merge(reflect.ValueOf(c.validateConfig), reflect.ValueOf(c.newConfig))
+
+	if err := c.validator.Struct(c.validateConfig); err != nil {
 		c.constructionErrors = append(c.constructionErrors, err)
 	}
-
+	merge(reflect.ValueOf(c.newConfig), reflect.ValueOf(c.validateConfig))
 	return c
 }
 

@@ -112,6 +112,58 @@ func makeFullConfig(
 	return newValue, usages
 }
 
+func makeValidateConfig(c reflect.Value) reflect.Value {
+	if !recursiveStruct(c) {
+		return reflect.Zero(c.Type())
+	}
+
+	populateEmptyStructs(c)
+
+	fields := make([]reflect.StructField, 0)
+	var newField reflect.StructField
+	cVal := c.Elem()
+
+	for i := range cVal.NumField() {
+		field := cVal.Type().Field(i)
+		fld := cVal.Field(i)
+		name := field.Name
+		structField := recursiveStruct(fld)
+
+		tag := field.Tag.Get("validate")
+
+		fieldType := field.Type
+		switch fld.Type() {
+		case parseableDurationType:
+			fieldType = durationType
+		case parseableDurationPtrType:
+			fieldType = durationPtrType
+		case parseableTimePtrType:
+			fieldType = timePtrType
+		case parseableURLType:
+			fieldType = urlType
+		}
+
+		if structField {
+			f := makeValidateConfig(fld)
+			fieldType = f.Type()
+		}
+
+		newField = reflect.StructField{
+			Name: name,
+			Type: fieldType,
+			Tag:  reflect.StructTag(fmt.Sprintf(`validate:"%s"`, tag)),
+		}
+
+		fields = append(fields, newField)
+	}
+
+	structType := reflect.StructOf(fields)
+	newValue := reflect.New(structType)
+
+	populateEmptyStructs(newValue)
+	return newValue
+}
+
 func buildTag(
 	tag reflect.StructTag,
 	name string,
@@ -198,12 +250,19 @@ func merge(oldV, newV reflect.Value) {
 			merge(targetField, sourceField)
 			continue
 		}
-
+		a := sourceField.Interface()
+		_ = a
 		if !isZero(sourceField) && targetField.CanSet() {
 			targetFieldType := targetField.Type()
 			switch sourceField.Type() {
-			case parseableDurationType, parseableDurationPtrType:
+			case durationType, durationPtrType, parseableDurationType, parseableDurationPtrType:
 				targetField.Set(sourceField.Convert(targetFieldType))
+			case timePtrType:
+				if targetFieldType == parseableTimePtrType {
+					targetField.Set(sourceField.Convert(timePtrType))
+				} else {
+					targetField.Set(sourceField)
+				}
 			case parseableTimePtrType:
 				if targetFieldType == timePtrType {
 					targetField.Set(sourceField.Convert(timePtrType))
