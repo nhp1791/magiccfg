@@ -255,26 +255,9 @@ func merge(oldV, newV reflect.Value) {
 		if !isZero(sourceField) && targetField.CanSet() {
 			targetFieldType := targetField.Type()
 			switch sourceField.Type() {
-			case durationType, durationPtrType, parseableDurationType, parseableDurationPtrType:
+			case durationType, durationPtrType, parseableDurationType, parseableDurationPtrType,
+				timePtrType, parseableTimePtrType, parseableURLType, urlType:
 				targetField.Set(sourceField.Convert(targetFieldType))
-			case timePtrType:
-				if targetFieldType == parseableTimePtrType {
-					targetField.Set(sourceField.Convert(timePtrType))
-				} else {
-					targetField.Set(sourceField)
-				}
-			case parseableTimePtrType:
-				if targetFieldType == timePtrType {
-					targetField.Set(sourceField.Convert(timePtrType))
-				} else {
-					targetField.Set(sourceField)
-				}
-			case parseableURLType:
-				if targetFieldType == urlType {
-					targetField.Set(sourceField.Convert(urlType))
-				} else {
-					targetField.Set(sourceField)
-				}
 			default:
 				targetField.Set(sourceField)
 			}
