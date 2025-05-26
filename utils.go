@@ -26,10 +26,14 @@ func recursiveStruct(c reflect.Value) bool {
 	cType := c.Type()
 	return c.Kind() == reflect.Ptr &&
 		cType.Elem().Kind() == reflect.Struct &&
+		cType != timeType &&
+		cType != parseableTimeType &&
 		cType != timePtrType &&
 		cType != parseableTimePtrType &&
 		cType != urlType &&
-		cType != parseableURLType
+		cType != urlPtrType &&
+		cType != parseableURLType &&
+		cType != parseableURLPtrType
 }
 
 func makeFullConfig(
@@ -76,10 +80,14 @@ func makeFullConfig(
 			fieldType = parseableDurationType
 		case durationPtrType:
 			fieldType = parseableDurationPtrType
+		case timeType:
+			fieldType = parseableTimeType
 		case timePtrType:
 			fieldType = parseableTimePtrType
 		case urlType:
 			fieldType = parseableURLType
+		case urlPtrType:
+			fieldType = parseableURLPtrType
 		}
 
 		if structField {
@@ -137,10 +145,14 @@ func makeValidateConfig(c reflect.Value) reflect.Value {
 			fieldType = durationType
 		case parseableDurationPtrType:
 			fieldType = durationPtrType
+		case parseableTimeType:
+			fieldType = timeType
 		case parseableTimePtrType:
 			fieldType = timePtrType
 		case parseableURLType:
 			fieldType = urlType
+		case parseableURLPtrType:
+			fieldType = urlPtrType
 		}
 
 		if structField {
@@ -250,13 +262,12 @@ func merge(oldV, newV reflect.Value) {
 			merge(targetField, sourceField)
 			continue
 		}
-		a := sourceField.Interface()
-		_ = a
 		if !isZero(sourceField) && targetField.CanSet() {
 			targetFieldType := targetField.Type()
 			switch sourceField.Type() {
 			case durationType, durationPtrType, parseableDurationType, parseableDurationPtrType,
-				timePtrType, parseableTimePtrType, parseableURLType, urlType:
+				timeType, timePtrType, parseableTimeType, parseableTimePtrType, parseableURLType, urlType,
+				urlPtrType, parseableURLPtrType:
 				targetField.Set(sourceField.Convert(targetFieldType))
 			default:
 				targetField.Set(sourceField)
@@ -268,8 +279,22 @@ func merge(oldV, newV reflect.Value) {
 func isZero(v reflect.Value) bool {
 	switch v.Kind() {
 	case reflect.Func, reflect.Struct, reflect.Ptr:
+		switch v.Type() {
+		case timeType:
+			return v.Interface().(time.Time).IsZero()
+		case parseableTimeType:
+			return time.Time(v.Interface().(ParseableTime)).IsZero()
+		case urlType:
+			u := v.Interface().(url.URL)
+			return u.String() == ""
+		case parseableURLType:
+			u := url.URL(v.Interface().(ParseableURL))
+			return u.String() == ""
+		case timePtrType, parseableTimePtrType, urlPtrType, parseableURLPtrType:
+			return v.IsZero()
+		}
 		return v.IsNil()
-	case reflect.Map, reflect.Slice:
+	case reflect.Map, reflect.Slice, parseableTimeKind:
 		return v.IsNil() || v.Len() == 0
 	default:
 		zero := reflect.Zero(v.Type())
@@ -311,16 +336,6 @@ func setDefaults(
 				fld.Set(reflect.MakeSlice(fld.Type(), 0, 0))
 			} else {
 				switch fld.Type() {
-				case durationType:
-					if d, err := time.ParseDuration(tag); err == nil {
-						fld.Set(reflect.ValueOf(d))
-					}
-					continue
-				case durationPtrType:
-					if d, err := time.ParseDuration(tag); err == nil {
-						fld.Set(reflect.ValueOf(&d))
-					}
-					continue
 				case parseableDurationType:
 					if d, err := time.ParseDuration(tag); err == nil {
 						x := ParseableDuration(d)
@@ -333,10 +348,11 @@ func setDefaults(
 						fld.Set(reflect.ValueOf(&x))
 					}
 					continue
-				case timePtrType:
+				case parseableTimeType:
 					for _, timeFormat := range timeFormats {
 						if t, err := time.Parse(timeFormat, tag); err == nil {
-							fld.Set(reflect.ValueOf(&t))
+							x := ParseableTime(t)
+							fld.Set(reflect.ValueOf(x))
 							break
 						}
 					}
@@ -350,9 +366,16 @@ func setDefaults(
 						}
 					}
 					continue
-				case urlType:
+				case parseableURLType:
 					if u, err := url.Parse(tag); err == nil {
-						fld.Set(reflect.ValueOf(u))
+						x := ParseableURL(*u)
+						fld.Set(reflect.ValueOf(x))
+					}
+					continue
+				case parseableURLPtrType:
+					if u, err := url.Parse(tag); err == nil {
+						x := ParseableURL(*u)
+						fld.Set(reflect.ValueOf(&x))
 					}
 					continue
 				}

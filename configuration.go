@@ -184,8 +184,8 @@ func (c *magicConfig[T]) ParseEnv() *magicConfig[T] {
 		env.Options{
 			TagName: _envTag,
 			FuncMap: map[reflect.Type]env.ParserFunc{
-				parseableDurationType:    UnmarshalDurationEnv,
-				parseableDurationPtrType: UnmarshalDurationPtrEnv,
+				parseableDurationType: UnmarshalDurationEnv,
+				parseableTimeType:     UnmarshalTimeEnv,
 			},
 		},
 	); err != nil {
