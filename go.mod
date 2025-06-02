@@ -1,4 +1,4 @@
-module magiccfg
+module github.com/nhp1791/magiccfg
 
 go 1.24.3
 
