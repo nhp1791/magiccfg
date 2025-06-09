@@ -9,7 +9,7 @@ const (
 	maxPort = 65536
 )
 
-// Validation function is a type that the magiccfg validation system can call
+// ValidationFunction is a type that the magiccfg validation system can call
 // to provide custom validation on a field.  Because magiccfg uses
 // github.com/go-playground/validator under the hood, more details regarding
 // custom validation functions can be found in the documentation to that package.

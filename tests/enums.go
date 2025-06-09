@@ -19,11 +19,3 @@ var TestEnumOnes = []TestEnumOne{
 func (t TestEnumOne) ValidateEnum() bool {
 	return slices.Contains(TestEnumOnes, t)
 }
-
-type FileType string
-
-const (
-	FileTypeYAML FileType = "yaml"
-	FileTypeJSON FileType = "json"
-	FileTypeTOML FileType = "toml"
-)

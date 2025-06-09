@@ -16,7 +16,7 @@ const (
 	_emptymap   = "emptymap"
 )
 
-func (c *magicConfig[T]) empty() reflect.Value {
+func (c *MagicConfig[T]) empty() reflect.Value {
 	newC := reflect.New(reflect.TypeOf(c.newConfig).Elem())
 	populateEmptyStructs(newC)
 	return newC
@@ -43,9 +43,9 @@ func makeFullConfig(
 	envParentName *string,
 ) (reflect.Value, map[string]map[string]int) {
 	usages := map[string]map[string]int{
-		_envTag: map[string]int{},
-		"long":  map[string]int{},
-		"short": map[string]int{},
+		_envTag: {},
+		"long":  {},
+		"short": {},
 	}
 
 	if !recursiveStruct(c) {
@@ -421,14 +421,14 @@ func setFieldValue(
 		if err != nil {
 			return
 		}
-		c := reflect.ValueOf(float64(v)).Convert(f.Type())
+		c := reflect.ValueOf(v).Convert(f.Type())
 		f.Set(c)
 	case reflect.Complex128, reflect.Complex64:
 		v, err := strconv.ParseComplex(val, 128)
 		if err != nil {
 			return
 		}
-		c := reflect.ValueOf(complex128(v)).Convert(f.Type())
+		c := reflect.ValueOf(v).Convert(f.Type())
 		f.Set(c)
 	case reflect.Bool:
 		b, err := strconv.ParseBool(val)
@@ -438,7 +438,7 @@ func setFieldValue(
 		c := reflect.ValueOf(b).Convert(f.Type())
 		f.Set(c)
 	case reflect.Map:
-		kvs := []string{}
+		var kvs []string
 		vals := map[string]string{}
 		if val != emptyMapIndicator {
 			kvs = strings.Split(val, listSeparator)
@@ -528,7 +528,7 @@ func setFieldValue(
 			case reflect.Complex128, reflect.Complex64:
 				i, err := strconv.ParseComplex(val, 128)
 				if err != nil {
-					return
+					continue
 				}
 				if pointer {
 					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(&i).Convert(elemType))
@@ -539,7 +539,7 @@ func setFieldValue(
 			case reflect.Float32, reflect.Float64:
 				v, err := strconv.ParseFloat(val, 64)
 				if err != nil {
-					return
+					continue
 				}
 				if pointer {
 					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(&v).Convert(elemType))
@@ -547,11 +547,13 @@ func setFieldValue(
 				} else {
 					c.SetMapIndex(reflect.ValueOf(k), reflect.ValueOf(v).Convert(elemType))
 				}
+			default:
+				continue
 			}
 		}
 		f.Set(c)
 	case reflect.Slice:
-		vals := []string{}
+		var vals []string
 		if val != emptySliceIndicator {
 			vals = strings.Split(val, listSeparator)
 		}
@@ -634,7 +636,7 @@ func setFieldValue(
 			case reflect.Float32, reflect.Float64:
 				v, err := strconv.ParseFloat(val, 64)
 				if err != nil {
-					return
+					continue
 				}
 				if pointer {
 					c = reflect.Append(c, reflect.ValueOf(&v).Convert(elemType))
@@ -644,16 +646,20 @@ func setFieldValue(
 			case reflect.Complex128, reflect.Complex64:
 				i, err := strconv.ParseComplex(val, 128)
 				if err != nil {
-					return
+					continue
 				}
 				if pointer {
 					c = reflect.Append(c, reflect.ValueOf(&i).Convert(elemType))
 				} else {
 					c = reflect.Append(c, reflect.ValueOf(i).Convert(elemType))
 				}
+			default:
+				continue
 			}
 		}
 		f.Set(c)
+	default:
+		return
 	}
 }
 
@@ -681,7 +687,7 @@ func transformValues(c reflect.Value, customFuncs []func(reflect.StructField, re
 }
 
 func validateEnums(c reflect.Value) []error {
-	errs := []error{}
+	var errs []error
 	if !recursiveStruct(c) {
 		return errs
 	}
@@ -765,7 +771,7 @@ func splitArgs(c reflect.Value, args []string, listSeparator string) []string {
 		return args
 	}
 
-	newArgs := []string{}
+	var newArgs []string
 
 	skip := false
 	var rawValues []string
@@ -797,7 +803,7 @@ func splitArgs(c reflect.Value, args []string, listSeparator string) []string {
 }
 
 func getValues(c reflect.Value, arg string, args []string, i int, listSeparator string) (string, []string, bool) {
-	values := []string{}
+	var values []string
 	fixedArg := arg
 
 	if strings.Contains(arg, "=") {
@@ -824,7 +830,7 @@ func getValues(c reflect.Value, arg string, args []string, i int, listSeparator 
 }
 
 func extractValues(c reflect.Value, arg string, valArg string, listSeparator string) []string {
-	values := []string{}
+	var values []string
 
 	if !strings.Contains(valArg, listSeparator) || !verifySliceOrMapType(c, arg) {
 		values = append(values, valArg)
@@ -868,8 +874,8 @@ func verifySliceOrMapType(c reflect.Value, arg string) bool {
 }
 
 func locateCLIFiles(options *Options, listSeparator string) ([]string, []string) {
-	args := []string{}
-	files := []string{}
+	var args []string
+	var files []string
 
 	shortPrefix := options.ConfigFileShort
 	if shortPrefix != "" && !strings.HasPrefix(shortPrefix, "-") {

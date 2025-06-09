@@ -109,7 +109,7 @@ func (p *ParseableTime) UnmarshalXML(d *xml.Decoder, start xml.StartElement) err
 			}
 		}
 	}
-	return fmt.Errorf("Could not parse time: %s", s)
+	return fmt.Errorf("could not parse time: %s", s)
 }
 
 func (p *ParseableTime) UnmarshalFlag(s string) error {
@@ -122,7 +122,7 @@ func (p *ParseableTime) UnmarshalFlag(s string) error {
 			}
 		}
 	}
-	return fmt.Errorf("Could not parse time: %s", s)
+	return fmt.Errorf("could not parse time: %s", s)
 }
 
 func (p *ParseableTime) UnmarshalYAML(value []byte) error {
@@ -133,7 +133,7 @@ func (p *ParseableTime) UnmarshalYAML(value []byte) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("Could not parse time: %s", value)
+	return fmt.Errorf("could not parse time: %s", value)
 }
 
 func (p *ParseableTime) UnmarshalTOML(value any) error {
@@ -148,7 +148,7 @@ func (p *ParseableTime) UnmarshalTOML(value any) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("Could not parse time: %s", value)
+	return fmt.Errorf("could not parse time: %s", value)
 }
 
 type ParseableURL url.URL

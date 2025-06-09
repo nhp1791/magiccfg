@@ -3,6 +3,7 @@ package magiccfg
 
 import (
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -15,7 +16,7 @@ import (
 	"github.com/jessevdk/go-flags"
 )
 
-type magicConfig[T any] struct {
+type MagicConfig[T any] struct {
 	envPrefix            string
 	emptySliceIndicator  string
 	emptyMapIndicator    string
@@ -49,13 +50,17 @@ type Options struct {
 	TimeFormats          []string
 }
 
-func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error) {
+func NewMagicConfig[T any](config *T, options *Options) (*MagicConfig[T], error) {
+	if options == nil {
+		options = &Options{}
+	}
+
 	listSeparator := ","
-	if options != nil && options.ListSeparator != "" {
+	if options.ListSeparator != "" {
 		listSeparator = options.ListSeparator
 	}
 
-	configFiles := []string{}
+	var configFiles []string
 	remainingArgs := os.Args
 	var cliFiles []string
 	if options.ConfigFileEnvName != "" {
@@ -74,62 +79,49 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 		return nil, fmt.Errorf("config must be a pointer to a struct")
 	}
 
-	prefix := ""
-	if options != nil {
-		prefix = strings.ToUpper(options.Prefix)
-	}
+	prefix := strings.ToUpper(options.Prefix)
 
 	emptySliceIndicator := _emptyslice
-	if options != nil && options.EmptySliceIndicator != "" {
+	if options.EmptySliceIndicator != "" {
 		emptySliceIndicator = options.EmptySliceIndicator
 	}
 
 	emptyMapIndicator := _emptymap
-	if options != nil && options.EmptyMapIndicator != "" {
+	if options.EmptyMapIndicator != "" {
 		emptyMapIndicator = options.EmptyMapIndicator
 	}
 
 	keyValueSeparator := ":"
-	if options != nil && options.KeyValueSeparator != "" {
+	if options.KeyValueSeparator != "" {
 		keyValueSeparator = options.KeyValueSeparator
 	}
 
-	ignoreUnknownOptions := false
-	if options != nil {
-		ignoreUnknownOptions = options.IgnoreUnknownOptions
-	}
+	ignoreUnknownOptions := options.IgnoreUnknownOptions
 
-	timeFormats := []string{}
-	if options != nil && options.TimeFormats != nil {
+	var timeFormats []string
+	if options.TimeFormats != nil {
 		timeFormats = options.TimeFormats
 	}
 	packageTimeFormats = timeFormats
 
 	vd := validator.New(validator.WithRequiredStructEnabled())
-	if options != nil {
-		for n, f := range options.ValidationFunctions {
-			if err := vd.RegisterValidation(n, (func(p validator.FieldLevel) bool)(f)); err != nil {
-				return nil, err
-			}
+	for n, f := range options.ValidationFunctions {
+		if err := vd.RegisterValidation(n, (func(p validator.FieldLevel) bool)(f)); err != nil {
+			return nil, err
 		}
 	}
 
-	var transformFuncs []func(reflect.StructField, reflect.Value)
-	if options != nil {
-		transformFuncs = options.TransformFuncs
-	}
+	transformFuncs := options.TransformFuncs
 
 	fc, usages := makeFullConfig(configVal, prefix, nil, nil)
-	if options != nil {
-		usages[_envTag][options.ConfigFileEnvName]++
-		usages["long"][options.ConfigFileLong]++
-		usages["short"][options.ConfigFileShort]++
-	}
+	usages[_envTag][options.ConfigFileEnvName]++
+	usages["long"][options.ConfigFileLong]++
+	usages["short"][options.ConfigFileShort]++
 
 	vc := makeValidateConfig(configVal)
 	conflict := false
 	var sb strings.Builder
-	sb.WriteString("Cannot construct configurationation due to the following conflicts:")
+	sb.WriteString("Cannot construct configuration due to the following conflicts:")
 	for key, v := range usages {
 		for k, n := range v {
 			if k != "" && n > 1 {
@@ -153,7 +145,7 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 
 	fullConfig := fc.Interface()
 
-	return &magicConfig[T]{
+	return &MagicConfig[T]{
 		originalConfig:       config,
 		newConfig:            fullConfig,
 		validateConfig:       vc.Interface(),
@@ -177,7 +169,7 @@ func NewMagicConfig[T any](config *T, options *Options) (*magicConfig[T], error)
 	}, nil
 }
 
-func (c *magicConfig[T]) ParseEnv() *magicConfig[T] {
+func (c *MagicConfig[T]) ParseEnv() *MagicConfig[T] {
 	newConfig := c.empty().Interface()
 	if err := env.ParseWithOptions(
 		newConfig,
@@ -195,7 +187,7 @@ func (c *magicConfig[T]) ParseEnv() *magicConfig[T] {
 	return c
 }
 
-func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
+func (c *MagicConfig[T]) ParseFiles() *MagicConfig[T] {
 	newConfig := c.empty().Interface()
 	for _, f := range c.configFiles {
 		data, err := os.ReadFile(f)
@@ -236,7 +228,7 @@ func (c *magicConfig[T]) ParseFiles() *magicConfig[T] {
 	return c
 }
 
-func (c *magicConfig[T]) ParseFlags() *magicConfig[T] {
+func (c *MagicConfig[T]) ParseFlags() *MagicConfig[T] {
 	newConfig := c.empty().Interface()
 	var parser *flags.Parser
 	if c.ignoreUnknownOptions {
@@ -246,7 +238,8 @@ func (c *magicConfig[T]) ParseFlags() *magicConfig[T] {
 	}
 	args := splitArgs(reflect.ValueOf(newConfig), c.remainingArgs, c.listSeparator)
 	if _, err := parser.ParseArgs(args); err != nil {
-		if e, ok := err.(*flags.Error); ok && e.Type == flags.ErrHelp {
+		var e *flags.Error
+		if errors.As(err, &e) && errors.Is(e.Type, flags.ErrHelp) {
 			e.Message = "Help Menu Displayed"
 		}
 		c.constructionErrors = append(c.constructionErrors, err)
@@ -255,7 +248,7 @@ func (c *magicConfig[T]) ParseFlags() *magicConfig[T] {
 	return c
 }
 
-func (c *magicConfig[T]) Validate() *magicConfig[T] {
+func (c *MagicConfig[T]) Validate() *MagicConfig[T] {
 	transformValues(reflect.ValueOf(c.newConfig), c.transformFuncs)
 	if errs := validateEnums(reflect.ValueOf(c.newConfig)); len(errs) > 0 {
 		c.constructionErrors = append(c.constructionErrors, errs...)
@@ -269,7 +262,7 @@ func (c *magicConfig[T]) Validate() *magicConfig[T] {
 	return c
 }
 
-func (c *magicConfig[T]) ApplyDefaults() *magicConfig[T] {
+func (c *MagicConfig[T]) ApplyDefaults() *MagicConfig[T] {
 	setDefaults(
 		reflect.ValueOf(c.newConfig),
 		c.listSeparator,
@@ -281,7 +274,7 @@ func (c *magicConfig[T]) ApplyDefaults() *magicConfig[T] {
 	return c
 }
 
-func (c *magicConfig[T]) Config() (*T, []error) {
+func (c *MagicConfig[T]) Config() (*T, []error) {
 	f := reflect.ValueOf(c.newConfig)
 	o := reflect.ValueOf(c.originalConfig)
 	merge(o, f)

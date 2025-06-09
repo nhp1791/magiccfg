@@ -20,7 +20,7 @@ func adjustCase(field reflect.StructField, fld reflect.Value) {
 		return
 	}
 
-	// Ensure that the tag value is lowercase for comparision with
+	// Ensure that the tag value is lowercase for comparison with
 	// the specific cases
 	tag := strings.ToLower(field.Tag.Get("case"))
 	if tag == "" {
@@ -103,7 +103,7 @@ func stripscheme(field reflect.StructField, fld reflect.Value) {
 	if fld.Kind() == reflect.Ptr {
 		f = reflect.Indirect(fld)
 	}
-	
+
 	if _, ok := field.Tag.Lookup("stripscheme"); !ok || f.Kind() != reflect.String {
 		return
 	}
