@@ -1,6 +1,7 @@
 package magiccfg
 
 import (
+	"os"
 	"reflect"
 	"strings"
 )
@@ -118,5 +119,21 @@ func stripscheme(field reflect.StructField, fld reflect.Value) {
 	v = strings.TrimPrefix(v, "udp://")
 	v = strings.TrimPrefix(v, "UDP://")
 	c := reflect.ValueOf(val).Convert(f.Type())
+	f.Set(c)
+}
+
+func interpEnv(field reflect.StructField, fld reflect.Value) {
+	f := fld
+	if fld.Kind() == reflect.Ptr {
+		f = reflect.Indirect(fld)
+	}
+
+	if _, ok := field.Tag.Lookup("interpEnv"); !ok || f.Kind() != reflect.String {
+		return
+	}
+
+	val := f.String()
+	newVal := os.ExpandEnv(val)
+	c := reflect.ValueOf(newVal).Convert(f.Type())
 	f.Set(c)
 }

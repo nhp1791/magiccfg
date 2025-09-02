@@ -679,6 +679,7 @@ func transformValues(c reflect.Value, customFuncs []func(reflect.StructField, re
 		stripslash(field, fld)
 		addslash(field, fld)
 		stripscheme(field, fld)
+		interpEnv(field, fld)
 
 		for _, customFunc := range customFuncs {
 			customFunc(field, fld)
