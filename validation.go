@@ -2,7 +2,6 @@ package magiccfg
 
 import (
 	"github.com/go-playground/validator/v10"
-	"time"
 )
 
 const (
@@ -10,8 +9,15 @@ const (
 	maxPort = 65536
 )
 
+// ValidationFunction is a type that the magiccfg validation system can call
+// to provide custom validation on a field.  Because magiccfg uses
+// github.com/go-playground/validator under the hood, more details regarding
+// custom validation functions can be found in the documentation to that package.
 type ValidationFunction func(validator.FieldLevel) bool
 
+// PortValidator is a validation function that ensures a configuration field
+// is populated with a valid, non-system port (i.e. doesn't use 1-1023 and
+// doesn't exceed 65535).
 func PortValidator(fl validator.FieldLevel) bool {
 	value, ok := fl.Field().Interface().(int)
 	if !ok {
@@ -21,23 +27,4 @@ func PortValidator(fl validator.FieldLevel) bool {
 		return true
 	}
 	return false
-}
-
-func TimeValidator(fl validator.FieldLevel) bool {
-	value, ok := fl.Field().Interface().(string)
-	if !ok {
-		return false
-	}
-
-	if _, err := time.Parse(time.RFC3339, value); err == nil {
-		return true
-	}
-
-	value += "Z"
-
-	if _, err := time.Parse(time.RFC3339, value); err != nil {
-		return false
-	}
-
-	return true
 }

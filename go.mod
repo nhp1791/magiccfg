@@ -3,9 +3,11 @@ module magiccfg
 go 1.24.3
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/davecgh/go-spew v1.1.1
 	github.com/go-playground/validator/v10 v10.26.0
+	github.com/goccy/go-yaml v1.19.2
 	github.com/jessevdk/go-flags v1.6.1
 	github.com/pelletier/go-toml/v2 v2.2.4
 	gopkg.in/yaml.v3 v3.0.1
