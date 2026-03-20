@@ -1,7 +1,4 @@
-// Package magiccfg provides
 package magiccfg
-
-// Package magiccfg provides easy
 
 import (
 	"encoding/xml"
@@ -18,7 +15,12 @@ import (
 	"github.com/jessevdk/go-flags"
 )
 
+// MagicConfig is a generic that is temporarily used to take a user-defined struct, which may be nested
+// with other structs to any degree, and allow a user to request that any combination of defaults, environment
+// variables, command-line flags, and yaml/toml/json/xml files can be used to set values for the non-struct
+// fields of the given configuration struct.  After construction, this object is eligible for garbage collection.
 type MagicConfig[T any] struct {
+	// types is a struct that holds all data types that are natively handled by magiccfg.
 	types                *types
 	envPrefix            string
 	zeroPointer          string
@@ -35,6 +37,7 @@ type MagicConfig[T any] struct {
 	configFiles          []string
 	configFileVars       map[string]string
 	remainingArgs        []string
+	customTypes          map[string]*customType
 }
 
 func NewMagicConfig[T any](config *T, options *Options) (*MagicConfig[T], error) {
@@ -116,6 +119,7 @@ func NewMagicConfig[T any](config *T, options *Options) (*MagicConfig[T], error)
 			"short": options.ConfigFileShort,
 			"long":  options.ConfigFileLong,
 		},
+		customTypes: options.CustomTypes,
 	}
 
 	fc, usages := c.makeFullConfig(configVal, prefix, nil, nil)
@@ -158,36 +162,44 @@ func NewMagicConfig[T any](config *T, options *Options) (*MagicConfig[T], error)
 
 func (c *MagicConfig[T]) ParseEnv() *MagicConfig[T] {
 	newConfig := c.empty().Interface()
+	funcMap := map[reflect.Type]env.ParserFunc{
+		c.types.stringPtrMapType:              c.parseStringPointerMap,
+		c.types.intPtrMapType:                 c.parseIntPointerMap,
+		c.types.int8PtrMapType:                c.parseInt8PointerMap,
+		c.types.int16PtrMapType:               c.parseInt16PointerMap,
+		c.types.int32PtrMapType:               c.parseInt32PointerMap,
+		c.types.int64PtrMapType:               c.parseInt64PointerMap,
+		c.types.uintPtrMapType:                c.parseUintPointerMap,
+		c.types.uint8PtrMapType:               c.parseUint8PointerMap,
+		c.types.uint16PtrMapType:              c.parseUint16PointerMap,
+		c.types.uint32PtrMapType:              c.parseUint32PointerMap,
+		c.types.uint64PtrMapType:              c.parseUint64PointerMap,
+		c.types.float32PtrMapType:             c.parseFloat32PointerMap,
+		c.types.float64PtrMapType:             c.parseFloat64PointerMap,
+		c.types.boolPtrMapType:                c.parseBoolPointerMap,
+		c.types.parseableComplex64Type:        c.parseParseableComplex64,
+		c.types.parseableComplex128Type:       c.parseParseableComplex128,
+		c.types.parseableComplex64MapPtrType:  c.parseComplex64MapPtr,
+		c.types.parseableComplex128MapPtrType: c.parseComplex128MapPtr,
+		c.types.parseableDurationMapPtrType:   c.parseDurationPointerMap,
+		c.types.parseableTimeMapPtrType:       c.parseTimePointerMap,
+		c.types.parseableURLMapType:           c.parseURLMap,
+		c.types.parseableURLMapPtrType:        c.parseURLPointerMap,
+		c.types.parseableDurationType:         UnmarshalDurationEnv,
+		c.types.parseableTimeType:             UnmarshalTimeEnv,
+	}
+
+	for _, ct := range c.customTypes {
+		if ct.environmentParser != nil {
+			funcMap[ct.basicType] = ct.environmentParser
+		}
+	}
+
 	if err := env.ParseWithOptions(
 		newConfig,
 		env.Options{
 			TagName: _envTag,
-			FuncMap: map[reflect.Type]env.ParserFunc{
-				c.types.stringPtrMapType:              c.parseStringPointerMap,
-				c.types.intPtrMapType:                 c.parseIntPointerMap,
-				c.types.int8PtrMapType:                c.parseInt8PointerMap,
-				c.types.int16PtrMapType:               c.parseInt16PointerMap,
-				c.types.int32PtrMapType:               c.parseInt32PointerMap,
-				c.types.int64PtrMapType:               c.parseInt64PointerMap,
-				c.types.uintPtrMapType:                c.parseUintPointerMap,
-				c.types.uint8PtrMapType:               c.parseUint8PointerMap,
-				c.types.uint16PtrMapType:              c.parseUint16PointerMap,
-				c.types.uint32PtrMapType:              c.parseUint32PointerMap,
-				c.types.uint64PtrMapType:              c.parseUint64PointerMap,
-				c.types.float32PtrMapType:             c.parseFloat32PointerMap,
-				c.types.float64PtrMapType:             c.parseFloat64PointerMap,
-				c.types.boolPtrMapType:                c.parseBoolPointerMap,
-				c.types.parseableComplex64Type:        c.parseParseableComplex64,
-				c.types.parseableComplex128Type:       c.parseParseableComplex128,
-				c.types.parseableComplex64MapPtrType:  c.parseComplex64MapPtr,
-				c.types.parseableComplex128MapPtrType: c.parseComplex128MapPtr,
-				c.types.parseableDurationMapPtrType:   c.parseDurationPointerMap,
-				c.types.parseableTimeMapPtrType:       c.parseTimePointerMap,
-				c.types.parseableURLMapType:           c.parseURLMap,
-				c.types.parseableURLMapPtrType:        c.parseURLPointerMap,
-				c.types.parseableDurationType:         UnmarshalDurationEnv,
-				c.types.parseableTimeType:             UnmarshalTimeEnv,
-			},
+			FuncMap: funcMap,
 		},
 	); err != nil {
 		c.constructionErrors = append(c.constructionErrors, err)
@@ -200,7 +212,9 @@ func (c *MagicConfig[T]) ParseFiles() *MagicConfig[T] {
 	if len(c.configFiles) == 0 {
 		return c
 	}
+	
 	newConfig := c.empty().Interface()
+
 	for _, f := range c.configFiles {
 		data, err := os.ReadFile(f)
 		if err != nil {

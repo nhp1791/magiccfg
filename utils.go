@@ -22,9 +22,26 @@ func (c *MagicConfig[T]) empty() reflect.Value {
 
 func (c *MagicConfig[T]) recursiveStruct(v reflect.Value) bool {
 	vType := v.Type()
+	k := v.Kind()
 	switch vType {
 	case c.types.timePtrType, c.types.parseableTimePtrType, c.types.urlPtrType, c.types.parseableURLPtrType:
 		return false
+	default:
+		for _, t := range c.customTypes {
+			if vType == t.basicType {
+				return false
+			}
+			if k == reflect.Ptr {
+				ut := vType.Elem()
+				n := ut.Name()
+				_ = n
+				bn := t.basicType.Name()
+				_ = bn
+				if ut == t.basicType {
+					return false
+				}
+			}
+		}
 	}
 
 	return v.Kind() == reflect.Ptr && vType.Elem().Kind() == reflect.Struct
@@ -302,7 +319,8 @@ func (c *MagicConfig[T]) populateEmptyStructs(v reflect.Value) {
 	for i := range vVal.NumField() {
 		field := vVal.Type().Field(i)
 		fld := vVal.Field(i)
-
+		name := field.Name
+		_ = name
 		if !c.recursiveStruct(fld) {
 			continue
 		}
@@ -707,12 +725,14 @@ func (c *MagicConfig[T]) isZero(v reflect.Value, tag string) bool {
 	if tag == _zeroPointer {
 		return true
 	}
-	switch v.Kind() {
+	kind := v.Kind()
+	switch kind {
 	case reflect.Func, reflect.Struct, reflect.Ptr:
-		if v.Kind() == reflect.Ptr && v.IsNil() {
+		if kind == reflect.Ptr && v.IsNil() {
 			return true
 		}
-		switch v.Type() {
+		vType := v.Type()
+		switch vType {
 		case c.types.durationType, c.types.parseableDurationType:
 			return v.Interface() == 0
 		case c.types.timeType:
@@ -728,6 +748,15 @@ func (c *MagicConfig[T]) isZero(v reflect.Value, tag string) bool {
 		case c.types.durationPtrType, c.types.parseableDurationPtrType, c.types.timePtrType,
 			c.types.parseableTimePtrType, c.types.urlPtrType, c.types.parseableURLPtrType:
 			return v.IsZero()
+		default:
+			for _, t := range c.customTypes {
+				if kind == reflect.Ptr {
+					vType = vType.Elem()
+				}
+				if vType == t.basicType {
+					return v.IsZero()
+				}
+			}
 		}
 		return v.IsNil()
 	case c.types.wrappedBoolKind:
@@ -763,14 +792,15 @@ func (c *MagicConfig[T]) setDefaults(
 		if !c.isZero(fld, tag) && (fld.Type().Kind() != reflect.Map || fld.Len() > 0) {
 			continue
 		}
-
+		kind := fld.Type().Kind()
 		if tag != "" {
-			if fld.Type().Kind() == reflect.Map {
+			if kind == reflect.Map {
 				fld.Set(reflect.MakeMap(fld.Type()))
-			} else if fld.Type().Kind() == reflect.Slice {
+			} else if kind == reflect.Slice {
 				fld.Set(reflect.MakeSlice(fld.Type(), 0, 0))
 			} else {
-				switch fld.Type() {
+				fType := fld.Type()
+				switch fType {
 				case c.types.parseableDurationType:
 					if d, err := time.ParseDuration(tag); err == nil {
 						x := ParseableDuration(d)
@@ -830,6 +860,7 @@ func (c *MagicConfig[T]) setDefaults(
 						x := ParseableComplex128(c)
 						fld.Set(reflect.ValueOf(x))
 					}
+					continue
 				case c.types.complex128PtrType:
 					if tag == zeroPointer {
 						tag = "0"
@@ -838,11 +869,13 @@ func (c *MagicConfig[T]) setDefaults(
 						x := ParseableComplex128(c)
 						fld.Set(reflect.ValueOf(&x))
 					}
+					continue
 				case c.types.complex64Type:
 					if c, err := strconv.ParseComplex(tag, 64); err == nil {
 						x := ParseableComplex64(c)
 						fld.Set(reflect.ValueOf(x))
 					}
+					continue
 				case c.types.complex64PtrType:
 					if tag == zeroPointer {
 						tag = "0"
@@ -850,6 +883,35 @@ func (c *MagicConfig[T]) setDefaults(
 					if c, err := strconv.ParseComplex(tag, 64); err == nil {
 						x := ParseableComplex64(c)
 						fld.Set(reflect.ValueOf(&x))
+					}
+					continue
+				default:
+					attempt := false
+					for _, t := range c.customTypes {
+						uType := fType
+						if kind == reflect.Ptr {
+							uType = uType.Elem()
+						}
+						if uType == t.basicType {
+							attempt = true
+							if t.defaultParser != nil {
+								result := t.defaultParser(tag)
+								if r, ok := result.(error); ok {
+									println(r.Error())
+									break
+								}
+								if kind == reflect.Ptr {
+									p := reflect.New(reflect.TypeOf(result))
+									p.Elem().Set(reflect.ValueOf(result))
+									fld.Set(p)
+								} else {
+									fld.Set(reflect.ValueOf(result))
+								}
+							}
+						}
+					}
+					if attempt {
+						continue
 					}
 				}
 
