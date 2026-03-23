@@ -193,6 +193,22 @@ func (c *MagicConfig[T]) ParseEnv() *MagicConfig[T] {
 		if ct.environmentParser != nil {
 			funcMap[ct.basicType] = ct.environmentParser
 		}
+		if ct.environmentListParser != nil {
+			typeSlice := reflect.MakeSlice(reflect.SliceOf(ct.basicType), 0, 0)
+			funcMap[typeSlice.Type()] = ct.environmentListParser
+		}
+		if ct.environmentListPointerParser != nil {
+			typeSlice := reflect.MakeSlice(reflect.SliceOf(reflect.PointerTo(ct.basicType)), 0, 0)
+			funcMap[typeSlice.Type()] = ct.environmentListPointerParser
+		}
+		if ct.environmentMapParser != nil {
+			typeMap := reflect.MakeMap(reflect.MapOf(c.types.stringType, ct.basicType))
+			funcMap[typeMap.Type()] = ct.environmentMapParser
+		}
+		if ct.environmentMapPointerParser != nil {
+			typeMap := reflect.MakeMap(reflect.MapOf(c.types.stringType, reflect.PointerTo(ct.basicType)))
+			funcMap[typeMap.Type()] = ct.environmentMapPointerParser
+		}
 	}
 
 	if err := env.ParseWithOptions(
@@ -212,7 +228,7 @@ func (c *MagicConfig[T]) ParseFiles() *MagicConfig[T] {
 	if len(c.configFiles) == 0 {
 		return c
 	}
-	
+
 	newConfig := c.empty().Interface()
 
 	for _, f := range c.configFiles {

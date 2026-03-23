@@ -167,6 +167,21 @@ func (c *MagicConfig[T]) makeFullConfig(
 			fieldType = c.types.parseableComplex128MapPtrType
 		}
 
+		for _, ct := range c.customTypes {
+			if fieldType == ct.listType && ct.parseableListType != nil {
+				fieldType = ct.parseableListType
+			}
+			if fieldType == ct.listPointerType && ct.parseableListPointerType != nil {
+				fieldType = ct.parseableListPointerType
+			}
+			if fieldType == ct.mapType && ct.parseableMapType != nil {
+				fieldType = ct.parseableMapType
+			}
+			if fieldType == ct.mapPointerType && ct.parseableMapPointerType != nil {
+				fieldType = ct.parseableMapPointerType
+			}
+		}
+
 		if structField {
 			f, subUsages := c.makeFullConfig(fld, prefix, &newParentName, &newEnvParentName)
 			fieldType = f.Type()
@@ -348,6 +363,17 @@ func (c *MagicConfig[T]) merge(oldV, newV reflect.Value) {
 			sourceFieldType := sourceField.Type()
 			if sourceFieldType == targetFieldType {
 				targetField.Set(sourceField)
+				continue
+			}
+			custom := false
+			for _, ct := range c.customTypes {
+				if sourceFieldType == ct.parseableMapType && ct.mergeMap != nil {
+					ct.mergeMap(sourceField, targetField)
+					custom = true
+					break
+				}
+			}
+			if custom {
 				continue
 			}
 			switch sourceFieldType {
@@ -1003,6 +1029,35 @@ func (c *MagicConfig[T]) setFieldValue(
 		kvs = strings.Split(val, listSeparator)
 		elemType := reflect.TypeOf(f.Interface()).Elem()
 
+		attempt := false
+		for _, t := range c.customTypes {
+			uType := elemType
+			if elemType.Kind() == reflect.Ptr {
+				uType = uType.Elem()
+			}
+			if uType == t.basicType {
+				attempt = true
+				if elemType.Kind() == reflect.Ptr && t.defaultMapPointerParser != nil {
+					result := t.defaultMapPointerParser(val)
+					if r, ok := result.(error); ok {
+						println(r.Error())
+						break
+					}
+					f.Set(reflect.ValueOf(result))
+				} else if t.defaultMapParser != nil {
+					result := t.defaultMapParser(val)
+					if r, ok := result.(error); ok {
+						println(r.Error())
+						break
+					}
+					f.Set(reflect.ValueOf(result))
+				}
+			}
+		}
+		if attempt {
+			return
+		}
+
 		switch elemType {
 		case c.types.parseableTimeType, c.types.parseableTimePtrType,
 			c.types.parseableURLType, c.types.parseableURLPtrType:
@@ -1199,6 +1254,35 @@ func (c *MagicConfig[T]) setFieldValue(
 		if elemKind == reflect.Ptr {
 			pointer = true
 			elemKind = elemType.Elem().Kind()
+		}
+
+		attempt := false
+		for _, t := range c.customTypes {
+			uType := elemType
+			if pointer {
+				uType = uType.Elem()
+			}
+			if uType == t.basicType {
+				attempt = true
+				if elemType.Kind() == reflect.Ptr && t.defaultListPointerParser != nil {
+					result := t.defaultListPointerParser(val)
+					if r, ok := result.(error); ok {
+						println(r.Error())
+						break
+					}
+					f.Set(reflect.ValueOf(result))
+				} else if t.defaultListParser != nil {
+					result := t.defaultListParser(val)
+					if r, ok := result.(error); ok {
+						println(r.Error())
+						break
+					}
+					f.Set(reflect.ValueOf(result))
+				}
+			}
+		}
+		if attempt {
+			return
 		}
 		switch elemType {
 		case c.types.parseableDurationType:
