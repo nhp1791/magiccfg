@@ -9,6 +9,15 @@ import (
 	"time"
 )
 
+func (c *MagicConfig[T]) parseWrappedBoolType(v string) (any, error) {
+	val, err := strconv.ParseBool(v)
+	if err != nil {
+		return nil, err
+	}
+
+	return Bool{Value: &val}, err
+}
+
 func (c *MagicConfig[T]) parseStringPointerMap(v string) (any, error) {
 	result := make(map[string]*string)
 

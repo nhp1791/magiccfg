@@ -17,12 +17,11 @@ var packageTimeFormats []string
 type types struct {
 	stringType                      reflect.Type
 	boolType                        reflect.Type
-	wrappedBoolType                 reflect.Type
-	wrappedBoolKind                 reflect.Kind
+	boolPtrType                     reflect.Type
 	boolSliceType                   reflect.Type
 	boolPtrSliceType                reflect.Type
+	wrappedBoolType                 reflect.Type
 	wrappedBoolSliceType            reflect.Type
-	wrappedBoolPtrSliceType         reflect.Type
 	intType                         reflect.Type
 	int8Type                        reflect.Type
 	int16Type                       reflect.Type
@@ -113,19 +112,17 @@ type types struct {
 }
 
 func newTypes() *types {
-	wrappedBoolType := reflect.TypeOf(Bool(true))
-	wrappedBoolKind := wrappedBoolType.Kind()
+	t := true
 
 	return &types{
 		stringType:                      reflect.TypeOf(""),
 		boolType:                        reflect.TypeOf(true),
-		wrappedBoolType:                 wrappedBoolType,
-		wrappedBoolKind:                 wrappedBoolKind,
+		boolPtrType:                     reflect.TypeOf(&t),
 		boolSliceType:                   reflect.TypeOf([]bool{}),
 		boolPtrSliceType:                reflect.TypeOf([]*bool{}),
 		boolPtrMapType:                  reflect.TypeOf(map[string]*bool{}),
-		wrappedBoolSliceType:            reflect.TypeOf(BoolSlice{}),
-		wrappedBoolPtrSliceType:         reflect.TypeOf(BoolPtrSlice{}),
+		wrappedBoolType:                 reflect.TypeOf(Bool{}),
+		wrappedBoolSliceType:            reflect.TypeOf([]Bool{}),
 		intType:                         reflect.TypeOf(0),
 		int8Type:                        reflect.TypeOf(int8(0)),
 		int16Type:                       reflect.TypeOf(int16(0)),
@@ -492,39 +489,53 @@ func (n *ParseableComplex64) UnmarshalXML(d *xml.Decoder, start xml.StartElement
 	return nil
 }
 
-type Bool bool
+type Bool struct {
+	Value *bool
+}
 
 func (b *Bool) UnmarshalFlag(s string) error {
-	c, err := strconv.ParseBool(strings.TrimSpace(s))
+	v, err := strconv.ParseBool(s)
 	if err != nil {
 		return err
 	}
+	*b = Bool{
+		Value: &v,
+	}
+	return nil
+}
 
-	*b = Bool(c)
+func (b *Bool) UnmarshalYAML(data []byte) error {
+	v, err := strconv.ParseBool(strings.TrimSpace(string(data)))
+	if err != nil {
+		return err
+	}
+	*b = Bool{
+		Value: &v,
+	}
+	return nil
+}
+
+func (b *Bool) UnmarshalTOML(value any) error {
+	v, ok := value.(bool)
+	if !ok {
+		return fmt.Errorf("%s is not a bool", value)
+	}
+
+	*b = Bool{Value: &v}
 
 	return nil
 }
 
-type BoolSlice []bool
-
-func (b *BoolSlice) UnmarshalFlag(s string) error {
+func (b *Bool) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	var s string
+	if err := d.DecodeElement(&s, &start); err != nil {
+		return err
+	}
 	c, err := strconv.ParseBool(strings.TrimSpace(s))
 	if err != nil {
 		return err
 	}
-	*b = append(*b, c)
 
-	return nil
-}
-
-type BoolPtrSlice []*bool
-
-func (b *BoolPtrSlice) UnmarshalFlag(s string) error {
-	c, err := strconv.ParseBool(strings.TrimSpace(s))
-	if err != nil {
-		return err
-	}
-	*b = append(*b, &c)
-
+	*b = Bool{Value: &c}
 	return nil
 }

@@ -185,6 +185,7 @@ func (c *MagicConfig[T]) ParseEnv() *MagicConfig[T] {
 		c.types.parseableTimeMapPtrType:       c.parseTimePointerMap,
 		c.types.parseableURLMapType:           c.parseURLMap,
 		c.types.parseableURLMapPtrType:        c.parseURLPointerMap,
+		c.types.wrappedBoolType:               c.parseWrappedBoolType,
 		c.types.parseableDurationType:         UnmarshalDurationEnv,
 		c.types.parseableTimeType:             UnmarshalTimeEnv,
 	}

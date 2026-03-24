@@ -33,10 +33,6 @@ func (c *MagicConfig[T]) recursiveStruct(v reflect.Value) bool {
 			}
 			if k == reflect.Ptr {
 				ut := vType.Elem()
-				n := ut.Name()
-				_ = n
-				bn := t.basicType.Name()
-				_ = bn
 				if ut == t.basicType {
 					return false
 				}
@@ -97,13 +93,17 @@ func (c *MagicConfig[T]) makeFullConfig(
 			if wrappedBool {
 				fieldType = c.types.wrappedBoolType
 			}
+		case c.types.boolPtrType:
+			if wrappedBool {
+				fieldType = c.types.wrappedBoolType
+			}
 		case c.types.boolSliceType:
 			if wrappedBool {
 				fieldType = c.types.wrappedBoolSliceType
 			}
 		case c.types.boolPtrSliceType:
 			if wrappedBool {
-				fieldType = c.types.wrappedBoolPtrSliceType
+				fieldType = c.types.wrappedBoolSliceType
 			}
 		case c.types.durationType:
 			fieldType = c.types.parseableDurationType
@@ -383,8 +383,46 @@ func (c *MagicConfig[T]) merge(oldV, newV reflect.Value) {
 				c.types.urlType, c.types.urlPtrType, c.types.parseableURLPtrType, c.types.complex128Type,
 				c.types.parseableComplex128Type, c.types.complex64Type, c.types.parseableComplex64Type,
 				c.types.complex128PtrType, c.types.parseableComplex128PtrType, c.types.complex64PtrType,
-				c.types.parseableComplex64PtrType, c.types.wrappedBoolType, c.types.boolType:
+				c.types.parseableComplex64PtrType:
 				targetField.Set(sourceField.Convert(targetFieldType))
+			case c.types.boolType:
+				if targetFieldType == c.types.wrappedBoolType {
+					sourceValue := sourceField.Interface().(bool)
+					targetValue := Bool{Value: &sourceValue}
+					targetField.Set(reflect.ValueOf(targetValue))
+				} else {
+					targetField.Set(sourceField.Convert(targetFieldType))
+				}
+			case c.types.boolPtrType:
+				if targetFieldType == c.types.wrappedBoolType {
+					sourceValue := sourceField.Interface().(*bool)
+					targetValue := Bool{Value: sourceValue}
+					targetField.Set(reflect.ValueOf(targetValue))
+				} else {
+					targetField.Set(sourceField.Convert(targetFieldType))
+				}
+			case c.types.boolSliceType:
+				if targetFieldType == c.types.wrappedBoolSliceType {
+					sourceSlice := sourceField.Interface().([]bool)
+					targetSlice := make([]Bool, len(sourceSlice))
+					for k := range sourceSlice {
+						targetSlice[k] = Bool{Value: &sourceSlice[k]}
+					}
+					targetField.Set(reflect.ValueOf(targetSlice))
+				} else {
+					targetField.Set(sourceField.Convert(targetFieldType))
+				}
+			case c.types.boolPtrSliceType:
+				if targetFieldType == c.types.wrappedBoolSliceType {
+					sourceSlice := sourceField.Interface().([]*bool)
+					targetSlice := make([]Bool, len(sourceSlice))
+					for k := range sourceSlice {
+						targetSlice[k] = Bool{Value: sourceSlice[k]}
+					}
+					targetField.Set(reflect.ValueOf(targetSlice))
+				} else {
+					targetField.Set(sourceField.Convert(targetFieldType))
+				}
 			case c.types.complex64SliceType:
 				sourceSlice := sourceField.Interface().([]complex64)
 				targetSlice := make([]ParseableComplex64, len(sourceSlice))
@@ -661,21 +699,6 @@ func (c *MagicConfig[T]) merge(oldV, newV reflect.Value) {
 					}
 				}
 				targetField.Set(reflect.ValueOf(targetMap))
-			case c.types.wrappedBoolSliceType:
-				sourceSlice := sourceField.Interface().(BoolSlice)
-				targetSlice := make([]bool, len(sourceSlice))
-				for k := range sourceSlice {
-					targetSlice[k] = bool(sourceSlice[k])
-				}
-				targetField.Set(reflect.ValueOf(targetSlice))
-			case c.types.wrappedBoolPtrSliceType:
-				sourceSlice := sourceField.Interface().(BoolPtrSlice)
-				targetSlice := make([]*bool, len(sourceSlice))
-				for k := range sourceSlice {
-					b := bool(*sourceSlice[k])
-					targetSlice[k] = &b
-				}
-				targetField.Set(reflect.ValueOf(targetSlice))
 			case c.types.parseableURLSliceType:
 				sourceSlice := sourceField.Interface().([]ParseableURL)
 				targetSlice := make([]url.URL, len(sourceSlice))
@@ -740,6 +763,40 @@ func (c *MagicConfig[T]) merge(oldV, newV reflect.Value) {
 					targetMap[k] = &u
 				}
 				targetField.Set(reflect.ValueOf(targetMap))
+			case c.types.wrappedBoolType:
+				sourceValue := sourceField.Interface().(Bool)
+				if sourceValue.Value != nil {
+					switch targetFieldType {
+					case c.types.boolType:
+						targetValue := *sourceValue.Value
+						targetField.Set(reflect.ValueOf(targetValue))
+					case c.types.boolPtrType:
+						targetValue := sourceValue.Value
+						targetField.Set(reflect.ValueOf(targetValue))
+					}
+				}
+			case c.types.wrappedBoolSliceType:
+				sourceSlice := sourceField.Interface().([]Bool)
+				switch targetFieldType {
+				case c.types.boolSliceType:
+					targetSlice := make([]bool, len(sourceSlice))
+					for k := range sourceSlice {
+						v := sourceSlice[k]
+						if v.Value != nil {
+							targetSlice[k] = *v.Value
+						}
+					}
+					targetField.Set(reflect.ValueOf(targetSlice))
+				case c.types.boolPtrSliceType:
+					targetSlice := make([]*bool, len(sourceSlice))
+					for k := range sourceSlice {
+						v := sourceSlice[k]
+						if v.Value != nil {
+							targetSlice[k] = v.Value
+						}
+					}
+					targetField.Set(reflect.ValueOf(targetSlice))
+				}
 			default:
 				targetField.Set(sourceField)
 			}
@@ -774,19 +831,22 @@ func (c *MagicConfig[T]) isZero(v reflect.Value, tag string) bool {
 		case c.types.durationPtrType, c.types.parseableDurationPtrType, c.types.timePtrType,
 			c.types.parseableTimePtrType, c.types.urlPtrType, c.types.parseableURLPtrType:
 			return v.IsZero()
+		case c.types.wrappedBoolType:
+			b := v.Interface().(Bool)
+			return b.Value == nil
 		default:
 			for _, t := range c.customTypes {
-				if kind == reflect.Ptr {
-					vType = vType.Elem()
-				}
+				//if kind == reflect.Ptr {
+				//	vType = vType.Elem()
+				//}
 				if vType == t.basicType {
 					return v.IsZero()
 				}
 			}
 		}
 		return v.IsNil()
-	case c.types.wrappedBoolKind:
-		return false
+	//case c.types.wrappedBoolKind:
+	//	return false
 	case reflect.Map, reflect.Slice, c.types.parseableTimeKind:
 		return v.IsNil() || v.Len() == 0
 	default:
@@ -815,17 +875,20 @@ func (c *MagicConfig[T]) setDefaults(
 			continue
 		}
 		tag := field.Tag.Get("def")
-		if !c.isZero(fld, tag) && (fld.Type().Kind() != reflect.Map || fld.Len() > 0) {
+
+		fType := fld.Type()
+		kind := fType.Kind()
+
+		if !c.isZero(fld, tag) &&
+			(kind != reflect.Map || fld.Len() > 0) {
 			continue
 		}
-		kind := fld.Type().Kind()
 		if tag != "" {
 			if kind == reflect.Map {
 				fld.Set(reflect.MakeMap(fld.Type()))
 			} else if kind == reflect.Slice {
 				fld.Set(reflect.MakeSlice(fld.Type(), 0, 0))
 			} else {
-				fType := fld.Type()
 				switch fType {
 				case c.types.parseableDurationType:
 					if d, err := time.ParseDuration(tag); err == nil {
@@ -972,7 +1035,20 @@ func (c *MagicConfig[T]) setFieldValue(
 		f = reflect.Indirect(fld)
 	}
 
-	switch f.Type().Kind() {
+	fType := f.Type()
+	kind := fType.Kind()
+
+	if fType == c.types.wrappedBoolType {
+		if val == zeroPointer || val == "" {
+			fls := false
+			f.Set(reflect.ValueOf(Bool{Value: &fls}))
+		} else if v, err := strconv.ParseBool(val); err == nil {
+			f.Set(reflect.ValueOf(Bool{Value: &v}))
+		}
+		return
+	}
+
+	switch kind {
 	case reflect.String:
 		if val == zeroPointer {
 			val = ""
@@ -1285,6 +1361,15 @@ func (c *MagicConfig[T]) setFieldValue(
 			return
 		}
 		switch elemType {
+		case c.types.wrappedBoolType:
+			for _, v := range vals {
+				if value, err := strconv.ParseBool(v); err == nil {
+					b := Bool{Value: &value}
+					s = reflect.Append(s, reflect.ValueOf(b))
+				}
+			}
+			f.Set(s)
+			return
 		case c.types.parseableDurationType:
 			for _, dur := range vals {
 				if d, err := time.ParseDuration(dur); err == nil {
