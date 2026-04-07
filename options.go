@@ -108,6 +108,7 @@ type Options struct {
 	ValidationFunctions  map[string]ValidationFunction
 	TransformFuncs       []func(reflect.StructField, reflect.Value)
 	TimeFormats          []string
+	DebugMenu            bool
 	CustomTypes          map[string]*customType
 }
 

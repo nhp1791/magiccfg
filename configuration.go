@@ -37,6 +37,7 @@ type MagicConfig[T any] struct {
 	configFiles          []string
 	configFileVars       map[string]string
 	remainingArgs        []string
+	debugMenu            bool
 	customTypes          map[string]*customType
 }
 
@@ -112,6 +113,7 @@ func NewMagicConfig[T any](config *T, options *Options) (*MagicConfig[T], error)
 		transformFuncs:       transformFuncs,
 		timeFormats:          timeFormats,
 		constructionErrors:   []error{},
+		debugMenu:            options.DebugMenu,
 		remainingArgs:        remainingArgs,
 		configFiles:          configFiles,
 		configFileVars: map[string]string{

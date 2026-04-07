@@ -85,7 +85,7 @@ func (c *MagicConfig[T]) makeFullConfig(
 			wrappedBool = true
 		}
 
-		tag := buildTag(field.Tag, name, prefix, structField, parentName, envParentName)
+		tag := buildTag(field.Tag, name, prefix, structField, c.debugMenu, parentName, envParentName)
 
 		fieldType := field.Type
 		switch fld.Type() {
@@ -273,6 +273,7 @@ func buildTag(
 	name string,
 	prefix string,
 	structField bool,
+	debugMenu bool,
 	parentName *string,
 	envParentName *string,
 ) reflect.StructTag {
@@ -297,6 +298,11 @@ func buildTag(
 	if tag.Get("toml") == "" {
 		sb.WriteString(fmt.Sprintf(` toml:"%s"`, dashName))
 	}
+	_, debug := tag.Lookup("debug")
+	if !debugMenu && debug {
+		sb.WriteString(` hidden:"true"`)
+	}
+
 	if !structField && tag.Get("long") == "" {
 		sb.WriteString(fmt.Sprintf(` long:"%s"`, convertNameToCommandLine(name, parentName)))
 	}
