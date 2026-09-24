@@ -1,0 +1,31 @@
+string: file
+string-no-def: file
+string-ptr: file
+string-ptr-no-def: file
+string-ptr-zero-ptr: file
+special-string: file
+special-string-ptr: file
+special-string-ptr-no-def: file
+special-string-ptr-zero-ptr: file
+special-ptr-string: file
+special-ptr-string-no-def: file
+special-ptr-string-zero-ptr: file
+
+strings:
+  - file
+  - strings
+  - val
+strings-no-def: [file,strings,val]
+strings-zero-def: [file,strings,val]
+special-strings: [file,strings,val]
+special-strings-no-def: [file,strings,val]
+special-strings-zero-def: [file,strings,val]
+special-ptr-strings: [file,strings,val]
+special-ptr-strings-no-def: [file,strings,val]
+special-ptr-strings-zero-def: [file,strings,val]
+strings-ptr: [file,strings,val]
+strings-ptr-no-def: [file,strings,val]
+strings-ptr-zero-def: [file,strings,val]
+special-strings-ptr: [file,strings,val]
+special-strings-ptr-no-def: [file,strings,val]
+special-strings-ptr-zero-def: [file,strings,val]

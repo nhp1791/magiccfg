@@ -853,7 +853,9 @@ func (c *MagicConfig[T]) isZero(v reflect.Value, tag string) bool {
 		return v.IsNil()
 	//case c.types.wrappedBoolKind:
 	//	return false
-	case reflect.Map, reflect.Slice, c.types.parseableTimeKind:
+	case reflect.Slice:
+		return v.IsNil()
+	case reflect.Map, c.types.parseableTimeKind:
 		return v.IsNil() || v.Len() == 0
 	default:
 		zero := reflect.Zero(v.Type())
@@ -885,15 +887,13 @@ func (c *MagicConfig[T]) setDefaults(
 		fType := fld.Type()
 		kind := fType.Kind()
 
-		if !c.isZero(fld, tag) &&
-			(kind != reflect.Map || fld.Len() > 0) {
-			continue
-		}
+		//if !c.isZero(fld, tag) &&
+		//	(kind != reflect.Map || fld.Len() > 0) {
+		//	continue
+		//}
 		if tag != "" {
 			if kind == reflect.Map {
 				fld.Set(reflect.MakeMap(fld.Type()))
-			} else if kind == reflect.Slice {
-				fld.Set(reflect.MakeSlice(fld.Type(), 0, 0))
 			} else {
 				switch fType {
 				case c.types.parseableDurationType:
@@ -1048,8 +1048,13 @@ func (c *MagicConfig[T]) setFieldValue(
 		if val == zeroPointer || val == "" {
 			fls := false
 			f.Set(reflect.ValueOf(Bool{Value: &fls}))
-		} else if v, err := strconv.ParseBool(val); err == nil {
-			f.Set(reflect.ValueOf(Bool{Value: &v}))
+		} else {
+			v, err := strconv.ParseBool(val)
+			if err == nil {
+				f.Set(reflect.ValueOf(Bool{Value: &v}))
+			} else {
+				c.constructionErrors = append(c.constructionErrors, err)
+			}
 		}
 		return
 	}
@@ -1061,12 +1066,28 @@ func (c *MagicConfig[T]) setFieldValue(
 		}
 		c := reflect.ValueOf(val).Convert(f.Type())
 		f.Set(c)
-	case reflect.Int, reflect.Int16, reflect.Int32, reflect.Int64, reflect.Int8, reflect.Uint, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uint8:
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if val == zeroPointer {
 			val = "0"
 		}
 		i, err := strconv.ParseInt(val, 10, 0)
 		if err != nil {
+			c.constructionErrors = append(c.constructionErrors, err)
+			return
+		}
+		c := reflect.ValueOf(int(i)).Convert(f.Type())
+		f.Set(c)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		if val == zeroPointer {
+			val = "0"
+		}
+		i, err := strconv.ParseInt(val, 10, 0)
+		if err != nil {
+			c.constructionErrors = append(c.constructionErrors, err)
+			return
+		}
+		if i < 0 {
+			c.constructionErrors = append(c.constructionErrors, fmt.Errorf("negative value for kind %s", kind.String()))
 			return
 		}
 		c := reflect.ValueOf(int(i)).Convert(f.Type())
@@ -1077,6 +1098,7 @@ func (c *MagicConfig[T]) setFieldValue(
 		}
 		v, err := strconv.ParseFloat(val, 64)
 		if err != nil {
+			c.constructionErrors = append(c.constructionErrors, err)
 			return
 		}
 		c := reflect.ValueOf(v).Convert(f.Type())
@@ -1087,6 +1109,7 @@ func (c *MagicConfig[T]) setFieldValue(
 		}
 		v, err := strconv.ParseComplex(val, 128)
 		if err != nil {
+			c.constructionErrors = append(c.constructionErrors, err)
 			return
 		}
 		c := reflect.ValueOf(v).Convert(f.Type())
@@ -1097,6 +1120,7 @@ func (c *MagicConfig[T]) setFieldValue(
 		}
 		b, err := strconv.ParseBool(val)
 		if err != nil {
+			c.constructionErrors = append(c.constructionErrors, err)
 			return
 		}
 		c := reflect.ValueOf(b).Convert(f.Type())
@@ -1122,14 +1146,14 @@ func (c *MagicConfig[T]) setFieldValue(
 				if elemType.Kind() == reflect.Ptr && t.defaultMapPointerParser != nil {
 					result := t.defaultMapPointerParser(val)
 					if r, ok := result.(error); ok {
-						println(r.Error())
+						c.constructionErrors = append(c.constructionErrors, r)
 						break
 					}
 					f.Set(reflect.ValueOf(result))
 				} else if t.defaultMapParser != nil {
 					result := t.defaultMapParser(val)
 					if r, ok := result.(error); ok {
-						println(r.Error())
+						c.constructionErrors = append(c.constructionErrors, r)
 						break
 					}
 					f.Set(reflect.ValueOf(result))
@@ -1322,12 +1346,14 @@ func (c *MagicConfig[T]) setFieldValue(
 		}
 		f.Set(m)
 	case reflect.Slice:
-		var vals []string
-		if val == "" || val == zeroPointer {
+		if val == "" {
+			return
+		} else if val == _zeroPointer {
+			f.Set(reflect.MakeSlice(f.Type(), 0, 0))
 			return
 		}
 
-		vals = strings.Split(val, listSeparator)
+		vals := strings.Split(val, listSeparator)
 
 		s := reflect.MakeSlice(f.Type(), 0, len(vals))
 		elemType := reflect.TypeOf(f.Interface()).Elem()
@@ -1794,4 +1820,41 @@ func locateCLIFiles(options *Options, listSeparator string) ([]string, []string)
 		}
 	}
 	return files, args
+}
+
+type StringType interface {
+	~string
+}
+
+func StringTypeJoin[T StringType](vals []T, joiner string) T {
+	strs := make([]string, len(vals))
+	for i := range vals {
+		strs[i] = string(vals[i])
+	}
+
+	return T(strings.Join(strs, joiner))
+}
+
+func PtrStringTypeJoin[T StringType](vals []*T, joiner string) *T {
+	strs := make([]string, len(vals))
+	for i := range vals {
+		strs[i] = string(*vals[i])
+	}
+
+	result := T(strings.Join(strs, joiner))
+	return &result
+}
+
+type StringPtrType interface {
+	~*string
+}
+
+func StringPtrTypeJoin[T StringPtrType](vals []T, joiner string) T {
+	strs := make([]string, len(vals))
+	for i := range vals {
+		strs[i] = string(*vals[i])
+	}
+
+	result := strings.Join(strs, joiner)
+	return T(&result)
 }

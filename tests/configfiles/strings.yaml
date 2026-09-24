@@ -1,0 +1,22 @@
+
+
+strings:
+  - "3"
+  - "4"
+  - "5"
+
+strings-no-def:
+  - "3"
+  - "4"
+  - "5"
+
+strings-zero-def: ["3", "4", "5"]
+
+strings-ptr: ["3", "4", "5"]
+
+strings-ptr-no-def: ["3", "4", "5"]
+
+strings-ptr-zero-def:
+  - "3"
+  - "4"
+  - "5"

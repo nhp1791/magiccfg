@@ -70,6 +70,10 @@ func NewMagicConfig[T any](config *T, options *Options) (*MagicConfig[T], error)
 	if options.ConfigFileLong != "" || options.ConfigFileShort != "" {
 		cliFiles, remainingArgs = locateCLIFiles(options, listSeparator)
 		configFiles = append(configFiles, cliFiles...)
+	} else {
+		for _, a := range os.Args {
+			remainingArgs = append(remainingArgs, a)
+		}
 	}
 
 	configVal := reflect.ValueOf(config)
@@ -303,8 +307,15 @@ func (c *MagicConfig[T]) Validate() *MagicConfig[T] {
 	}
 	c.merge(reflect.ValueOf(c.validateConfig), reflect.ValueOf(c.newConfig))
 
-	if err := c.validator.Struct(c.validateConfig); err != nil {
-		c.constructionErrors = append(c.constructionErrors, err)
+	if errs := c.validator.Struct(c.validateConfig); errs != nil {
+		var e validator.ValidationErrors
+		if errors.As(errs, &e) {
+			for _, err := range e {
+				c.constructionErrors = append(c.constructionErrors, err)
+			}
+		} else {
+			c.constructionErrors = append(c.constructionErrors, errs)
+		}
 	}
 	c.merge(reflect.ValueOf(c.newConfig), reflect.ValueOf(c.validateConfig))
 	return c
